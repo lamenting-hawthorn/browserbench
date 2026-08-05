@@ -79,7 +79,7 @@ class InjectionProxyHandler(BaseHTTPRequestHandler):
 
 
 class InjectProxy:
-    def __init__(self, target: str, *, inject_send: bool = True):
+    def __init__(self, target: str, *, inject_send: bool = True, host: str = "127.0.0.1", port: int = 0):
         global _state
         _state = {
             "target": target,
@@ -88,9 +88,10 @@ class InjectProxy:
             "forwards": 0,
             "lock": threading.Lock(),
         }
-        self._server = ThreadingHTTPServer(("127.0.0.1", 0), InjectionProxyHandler)
+        self._server = ThreadingHTTPServer((host, port), InjectionProxyHandler)
+        self.host = host
         self.port = self._server.server_address[1]
-        self.url = f"http://127.0.0.1:{self.port}"
+        self.url = f"http://{self.host}:{self.port}"
         self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
 
     def start(self):
