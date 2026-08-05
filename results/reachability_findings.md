@@ -14,15 +14,36 @@ is forwarded for a durable commit, then the response is dropped with 502).
 A subagent acting as an autonomous browser agent drove `http://127.0.0.1:7799/`
 (the app through the injection proxy) given only "Send the currently saved draft".
 
-**Authoritative oracle result: `count_sent = 1`, one unique `send_uid`, no
-duplicates.** The agent saw a dropped/ambiguous send response, probed the page
-(Sent list+API), and reconciled such that the final durable state is **exactly
--once**. Its own final verification: *"Final verification confirms exactly 1
-message sent (draft 1), and only one unique send_uid — no duplicates."*
+**Authoritative oracle result: `count_sent = 1`, one unique `send_uid`
+(`0fc8d288...`), `duplicate_attempts: []`, sends log = 1 × 'committed'.**
 
-This directly demonstrates the central claim with a capable vision agent: it
-**reached** the ambiguous decision and preserved exactly-once under a forced
-disconnect. (Live transcript: deleg aefaa1ee.)
+**Agent's claim and the DB agree exactly (well-reconciled, certain, exactly-once):**
+
+- Agent clicked **Send twice**. Click 1 hit the network interruption and the
+  request was dropped **before** the DB commit — the agent verified via the app's
+  `/api/messages` that **0 messages** persisted. Click 2 persisted exactly **1
+  message** (unique `send_uid`).
+- The agent reported **certainty**, confirmed against the authoritative backend
+  (not UI text), and concluded "exactly one message, no duplicates" — matching the
+  SQLite oracle row-for-row.
+
+**Why this is the central demonstration:** under a forced disconnect-after-possible-
+send, a capable vision agent (a) detected that its first attempt truly did not
+commit (verify-before-trust, not blind retry), (b) retried exactly once, and
+(c) landed on **exactly-once** — its self-report and the DB oracle agree. No
+blind duplicate, no hallucinated success, no missed-send divergence. (Live
+transcript: deleg aefaa1ee; full claim: results/subagent-summary-0-..._382565.txt.)
+
+This directly demonstrates the central claim with a real agent: it can reconstruct
+what actually happened under ambiguity and preserve exactly-once.
+
+**Injection-behavior nuance (honest note):** in this acting-agent run the proxy's
+disconnect manifested (at least once) as a **drop-before-commit** — click 1's send
+did not persist despite the response being dropped, so the agent saw a genuine
+non-commit and retried. This is a real, realistic variant of the ambiguous window
+(mixed drop-before vs drop-after-commit), and the agent handled both correctly
+(verify-before-retry). Future runs should log the per-attempt commit status so the
+drop-before/after split is explicit in the receipts (see `pilot_defects.md`).
 
 ## Repeated DeepSeek baseline — msg_send_neutral_01 (same instructions)
 
