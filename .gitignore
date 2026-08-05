@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Browser profiles / artifacts
+browser/artifacts/
+node_modules/
+
+# Test / result artifacts (receipts are gitignored only if huge; for pilot we
+# keep manifests committed to prove reproducibility — adjust when data grows)
+# manifests/.keep
+results/*.png
+results/__pycache__/
+
+# OS
+.DS_Store
+
+# SQLite fixture state (the DB is regenerated deterministically by reset()/init_db)
+**/btb.db
+**/btb.db-wal
+**/btb.db-shm
+*.db-journal

@@ -1,0 +1,18 @@
+[project]
+name = "browsertransactionbench"
+version = "0.1.0"
+description = "BrowserTransactionBench: transactional safety (exactly-once effects, forbidden side effects, unknown outcomes) for browser-use agents."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Raghav" }]
+
+[project.optional-dependencies]
+baselines = ["browser-use>=0.13.0"]
+
+[tool.setuptools.packages.find]
+include = ["btb*"]
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py", "*_test.py"]
+testpaths = ["tests"]

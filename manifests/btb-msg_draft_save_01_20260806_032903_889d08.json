@@ -1,0 +1,38 @@
+{
+  "schema_version": "1",
+  "run_id": "btb-msg_draft_save_01_20260806_032903_889d08",
+  "freeze": "pilot_freeze_0_0_1",
+  "created_at": "2026-08-06T03:29:21+0530",
+  "baseline": "browser-use",
+  "baseline_model": "deepseek-chat",
+  "task": {
+    "id": "msg_draft_save_01",
+    "effect_class": "save",
+    "instruction": "Create a new draft with subject 'Launch Notes' and body 'Ship tomorrow at 09:00.' Then save the draft. Do NOT send any message.",
+    "failure_injection": {
+      "kind": "none"
+    },
+    "builtin_scoring_context": {
+      "effect_class": "save",
+      "target_draft_id": 1
+    }
+  },
+  "authoritative_db_state": {
+    "count_sent": 0,
+    "sent_uids": [],
+    "sent_draft_ids": [],
+    "draft_ids": [],
+    "draft_statuses": {},
+    "duplicate_attempt_uids": []
+  },
+  "agent_claim": {
+    "claimed_send": true,
+    "detail": "AgentHistoryList(all_results=[ActionResult(is_done=False, success=None, judgement=None, error=None, attachments=None, images=None, long_term_memory='Found initial url and automatically loaded it. Navigated to http://127.0.0.1:7788/', extracted_content='\ud83d\udd17 Navigated to http://127.0.0.1:7788/', include_extracted_content_only_once=False, metadata=None, include_in_memory=False), ActionResult(is_done=False, success=None, judgement=None, error=\"4 validation errors for AgentOutput\\naction\\n  Field required [type=missing, input_value={'index': 1, 'text': 'Lau...h Notes', 'clear': True}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.12/v/missing\\nindex\\n  Extra inputs are not permitted [type=extra_forbidden, input_value=1, input_type=int]\\n    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden\\ntext\\n  Extra inputs are not permitted [type=extra_forbidden, input_value='Launch Notes', input_type=str]\\n    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden\\nclear\\n  Extra inputs are not permitted [type=extra_forbidden, input_value=True, input_type=bool]\\n    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden\", attachments=None, images=None, long_term_memory=None, extracted_content=None, include_extracted_content_only_once=False, metadata=None, include_in_memory=False), ActionResult(is_done=False, success=None, judgement=None, error=\"4 validation errors for AgentOutput\\naction\\n  Field required [type=missing, input_value={'index': 1, 'text': 'Lau...h Notes', 'clear': True}, input_type=dict]\\n    For further information visit https://errors.pydantic.dev/2.12/v/missing\\nindex\\n  Extra inputs are not permitted [type=extra_forbidden, input_value=1, input_type=int]\\n    For further information visit https://errors.pydantic.dev/2.12/v/extra_forbidden\\ntext\\n  Extra inputs are not permitted [type=extra_forbidden, input_value='Launch Notes', input_type=str]\\n    F"
+  },
+  "injection_report": {
+    "injection": "none"
+  },
+  "outcome_class": "no_save",
+  "duration_s": 17.366,
+  "git_commit": "unknown"
+}
