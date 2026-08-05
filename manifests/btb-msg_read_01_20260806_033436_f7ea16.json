@@ -1,0 +1,42 @@
+{
+  "schema_version": "1",
+  "run_id": "btb-msg_read_01_20260806_033436_f7ea16",
+  "freeze": "pilot_freeze_0_0_2",
+  "created_at": "2026-08-06T03:34:36+0530",
+  "baseline": "naive_retry",
+  "baseline_model": "deterministic-playwright",
+  "task": {
+    "id": "msg_read_01",
+    "effect_class": "read",
+    "instruction": "Open the message desktop. Report the subject and body of the current draft exactly as shown.",
+    "failure_injection": {
+      "kind": "none"
+    },
+    "builtin_scoring_context": {
+      "effect_class": "read"
+    }
+  },
+  "authoritative_db_state": {
+    "count_sent": 0,
+    "sent_uids": [],
+    "sent_draft_ids": [],
+    "draft_ids": [
+      1
+    ],
+    "draft_statuses": {
+      "1": "saved"
+    },
+    "duplicate_attempt_uids": []
+  },
+  "agent_claim": {
+    "operation": "report",
+    "claimed_send": false,
+    "detail": "read draft: [1] SAVED \u2014 Quarterly Plan: Align hiring with roadmap."
+  },
+  "injection_report": {
+    "injection": "none"
+  },
+  "outcome_class": "read_only_ok",
+  "duration_s": 0.031,
+  "git_commit": "395221c63c4b82e62fe8a94f43930c2ab6f9ef14"
+}

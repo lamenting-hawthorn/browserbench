@@ -1,0 +1,43 @@
+{
+  "schema_version": "1",
+  "run_id": "btb-msg_draft_save_01_20260806_033436_eee5dc",
+  "freeze": "pilot_freeze_0_0_2",
+  "created_at": "2026-08-06T03:34:37+0530",
+  "baseline": "naive_retry",
+  "baseline_model": "deterministic-playwright",
+  "task": {
+    "id": "msg_draft_save_01",
+    "effect_class": "save",
+    "instruction": "Create a new draft with subject 'Launch Notes' and body 'Ship tomorrow at 09:00.' Then save the draft. Do NOT send any message.",
+    "failure_injection": {
+      "kind": "none"
+    },
+    "builtin_scoring_context": {
+      "effect_class": "save",
+      "target_draft_id": 1
+    }
+  },
+  "authoritative_db_state": {
+    "count_sent": 0,
+    "sent_uids": [],
+    "sent_draft_ids": [],
+    "draft_ids": [
+      1
+    ],
+    "draft_statuses": {
+      "1": "saved"
+    },
+    "duplicate_attempt_uids": []
+  },
+  "agent_claim": {
+    "operation": "save",
+    "claimed_send": false,
+    "detail": "created+selected+saved"
+  },
+  "injection_report": {
+    "injection": "none"
+  },
+  "outcome_class": "saved_once",
+  "duration_s": 0.156,
+  "git_commit": "395221c63c4b82e62fe8a94f43930c2ab6f9ef14"
+}

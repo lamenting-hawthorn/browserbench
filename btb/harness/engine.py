@@ -15,7 +15,6 @@ import os
 import time
 from pathlib import Path
 
-from btb.app import db
 from btb.baselines import play as play_baseline
 from btb.harness import inject as inject_mod
 from btb.harness import manifest as manifest_mod

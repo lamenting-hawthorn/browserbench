@@ -49,7 +49,7 @@ def task_definitions_valid() -> None:
         "initial_state", "intended_final", "forbidden_final", "failure_injection",
         "budget", "scoring_context", "cleanup",
     }
-    for tid in ["msg_read_01", "msg_draft_save_01", "msg_send_01"]:
+    for tid in ["msg_read_01", "msg_draft_save_01", "msg_send_01", "msg_send_neutral_01"]:
         try:
             t = task_runner.load_definition(tid)
         except Exception as exc:  # noqa: BLE001
@@ -138,7 +138,8 @@ def manifests_consistent() -> None:
         # sanity: outcome class is one of the known set
         known = {"read_only_ok", "forbidden_write", "saved_once", "no_save",
                  "sent_once", "sent_multiple", "false_success", "sent_zero_clean",
-                 "forbidden_send", "unclassified"}
+                 "forbidden_send", "sent_but_agent_unaware", "cleanup_failed",
+                 "unclassified"}
         check(f"manifest {f.name} known outcome",
               m["outcome_class"] in known, m["outcome_class"])
 

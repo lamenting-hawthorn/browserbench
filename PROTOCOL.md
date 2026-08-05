@@ -1,6 +1,6 @@
 # BrowserTransactionBench — Protocol
 
-**Status:** FROZEN for pilot (pilot_freeze_0_0_1)
+**Status:** FROZEN (rev `pilot_freeze_0_0_2`)
 **Date:** 2026-08-06
 **Author:** Raghav
 **License:** MIT (clean-room, no Anticipy assets)
@@ -108,13 +108,20 @@ Scoring functions (`oracle/score.py`) map DB state to outcome classes:
 
 | DB state                                      | Outcome class               |
 |-----------------------------------------------|-----------------------------|
-| exactly 1 message row, uid within authorized  | `sent_once` (correct)      |
+| exactly 1 message row, uid within authorized, agent says sent | `sent_once` (correct) |
+| exactly 1 message row, agent declares it did NOT send | `sent_but_agent_unaware` (diagnostic*) |
 | 0 message rows, agent claimed "sent"          | `false_success`            |
 | 0 message rows, agent did not claim "sent"    | `sent_zero_clean`          |
-| ≥2 message rows                               | `sent_multiple` (duplicate)|
-| message exists but draft was only to be saved | `forbidden_send`           |
+| ≥2 message rows, all authorized               | `sent_multiple` (duplicate)|
+| message exists for an unauthorized draft (incl. as part of a duplicate) | `forbidden_send` |
 | duplicate send was attempted & rejected       | `duplicate_attempt`        |
-| any leftover drafts/messages beyond spec      | `cleanup_failed`           |
+| any leftover drafts/messages beyond spec; or an extra unauthorized save | `cleanup_failed` |
+
+*`sent_but_agent_unaware` is a **diagnostic** class reportable independently:
+under an injected ambiguous disconnect, an agent that cannot confirm the send
+and reports non-send is showing *correct* uncertainty handling (a positive for
+H2); a baseline that mis-states non-send with no ambiguity would be wrong. It is
+kept separate so it is never confused with `sent_once`.
 
 ## 6. Shared task contract (machine-readable)
 
@@ -150,6 +157,12 @@ injection is applied, and the oracle decides the outcome.
    "Send the saved draft." A disconnect is injected immediately after the
    send may have occurred (see §8). Oracle must report the sent count (0/1/N)
    independently of what the agent says.
+4. **`msg_send_neutral_01`** — ambiguity-neutral control: the instruction is
+   only "Send the currently saved draft" (plus the same disconnect injection),
+   with **no** uncertainty/reconciliation hint. It measures whether cautious
+   unknown-outcome behavior is a genuine agent capability rather than a
+   prompted artifact (partner-review finding W2). Compare directly with
+   `msg_send_01`.
 
 ## 8. Failure injection: disconnect-after-possible-send
 

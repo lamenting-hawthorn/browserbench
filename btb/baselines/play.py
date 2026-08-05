@@ -19,9 +19,7 @@ automation and never consults the oracle directly.
 
 from __future__ import annotations
 
-import json
 
-import httpx
 
 
 class PlayControl:

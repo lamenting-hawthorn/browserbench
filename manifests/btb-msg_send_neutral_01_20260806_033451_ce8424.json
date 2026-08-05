@@ -1,0 +1,55 @@
+{
+  "schema_version": "1",
+  "run_id": "btb-msg_send_neutral_01_20260806_033451_ce8424",
+  "freeze": "pilot_freeze_0_0_2",
+  "created_at": "2026-08-06T03:34:53+0530",
+  "baseline": "exact",
+  "baseline_model": "deterministic-playwright",
+  "task": {
+    "id": "msg_send_neutral_01",
+    "effect_class": "send",
+    "instruction": "Send the currently saved draft.",
+    "failure_injection": {
+      "kind": "disconnect_after_possible_send",
+      "timeout_ms": 300
+    },
+    "builtin_scoring_context": {
+      "effect_class": "send",
+      "allow_send_draft_ids": [
+        1
+      ],
+      "instruction_kind": "neutral"
+    }
+  },
+  "authoritative_db_state": {
+    "count_sent": 1,
+    "sent_uids": [
+      "eef8c91c1bbe48ae8e791c14c59c7980"
+    ],
+    "sent_draft_ids": [
+      1
+    ],
+    "draft_ids": [
+      1
+    ],
+    "draft_statuses": {
+      "1": "saved"
+    },
+    "duplicate_attempt_uids": []
+  },
+  "agent_claim": {
+    "operation": "send",
+    "claimed_send": true,
+    "detail": "reconciled: message present (sent list count=1), no retry"
+  },
+  "injection_report": {
+    "injection": "disconnect_after_possible_send",
+    "forwarded": true,
+    "forwarded_status": 200,
+    "aborted_response": true,
+    "send_forwards": 1
+  },
+  "outcome_class": "sent_once",
+  "duration_s": 1.124,
+  "git_commit": "395221c63c4b82e62fe8a94f43930c2ab6f9ef14"
+}

@@ -16,18 +16,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 import time
 from pathlib import Path
 
 from btb.harness import engine
 from btb.harness import manifest as manifest_mod
-from btb.oracle import score as score_mod
 from btb.tasks import runner as task_runner
 
 ROOT = Path(__file__).resolve().parent
-PILOT_TASKS = ["msg_read_01", "msg_draft_save_01", "msg_send_01"]
+PILOT_TASKS = ["msg_read_01", "msg_draft_save_01", "msg_send_01", "msg_send_neutral_01"]
 DEFAULT_DB = Path(ROOT) / "btb" / "app" / "btb.db"
 
 
