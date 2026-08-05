@@ -74,6 +74,27 @@ class PlayControl:
         self.page.wait_for_selector("#msg")
         return {"operation": "save", "claimed_send": False, "detail": "created+selected+saved"}
 
+    def _wait_sent_settled(self, max_wait_s: float = 2.5, stable_s: float = 0.3) -> int:
+        """Poll #sent li until its count is stable, then return it.
+
+        Load-insensitive replacement for a fixed sleep: refreshSent() fills the
+        Sent list asynchronously after reload, so we wait until the count stops
+        changing rather than sleeping an arbitrary amount.
+        """
+        import time as _time
+
+        deadline = _time.monotonic() + max_wait_s
+        last_count = self.page.locator("#sent li").count()
+        last_change = _time.monotonic()
+        while _time.monotonic() < deadline:
+            if self.page.locator("#sent li").count() != last_count:
+                last_count = self.page.locator("#sent li").count()
+                last_change = _time.monotonic()
+            if _time.monotonic() - last_change >= stable_s:
+                break
+            self.page.wait_for_timeout(50)
+        return last_count
+
     def msg_send(self) -> dict:
         """Send the (single) saved draft, applying the configured behavior when
         the send response is dropped by the injection.
@@ -107,11 +128,9 @@ class PlayControl:
         self.page.wait_for_timeout(300)
         self.page.goto(self.base_url + "/")  # re-runs refresh()+refreshSent()
         # Ensure the page loaded AND the async refreshSent() has populated the
-        # Sent list before counting it. Waiting on drafts confirms refresh() ran;
-        # a short settle lets the parallel refreshSent() fetch complete.
+        # Sent list before counting it (deterministic settle, not a fixed sleep).
         self.page.wait_for_selector("ul#drafts li")
-        self.page.wait_for_timeout(600)
-        sent_before = self.page.locator("#sent li").count()
+        sent_before = self._wait_sent_settled()
         if sent_before >= 1:
             # Effect already durable; do NOT retry. Exactly-once preserved.
             return {

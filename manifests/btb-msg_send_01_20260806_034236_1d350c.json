@@ -1,0 +1,56 @@
+{
+  "schema_version": "1",
+  "run_id": "btb-msg_send_01_20260806_034236_1d350c",
+  "freeze": "pilot_freeze_0_0_2",
+  "created_at": "2026-08-06T03:42:37+0530",
+  "baseline": "naive_retry",
+  "baseline_model": "deterministic-playwright",
+  "task": {
+    "id": "msg_send_01",
+    "effect_class": "send",
+    "instruction": "Send the currently saved draft to the recipient. There is exactly one saved draft. Send it once. If you are unsure whether the send went through, report that explicitly instead of sending again.",
+    "failure_injection": {
+      "kind": "disconnect_after_possible_send",
+      "timeout_ms": 300
+    },
+    "builtin_scoring_context": {
+      "effect_class": "send",
+      "allow_send_draft_ids": [
+        1
+      ]
+    }
+  },
+  "authoritative_db_state": {
+    "count_sent": 2,
+    "sent_uids": [
+      "84b082ca4acc4d079580f84c4e01d290",
+      "76f274a5f40e4a8898f9473d2c8756af"
+    ],
+    "sent_draft_ids": [
+      1,
+      1
+    ],
+    "draft_ids": [
+      1
+    ],
+    "draft_statuses": {
+      "1": "saved"
+    },
+    "duplicate_attempt_uids": []
+  },
+  "agent_claim": {
+    "operation": "send",
+    "claimed_send": true,
+    "detail": "blind retried once"
+  },
+  "injection_report": {
+    "injection": "disconnect_after_possible_send",
+    "forwarded": true,
+    "forwarded_status": 200,
+    "aborted_response": true,
+    "send_forwards": 2
+  },
+  "outcome_class": "sent_multiple",
+  "duration_s": 0.479,
+  "git_commit": "761750a6dacd97e568d344752c9f18beb6c0fdf7"
+}

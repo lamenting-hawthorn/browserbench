@@ -14,10 +14,10 @@ from __future__ import annotations
 import os
 import time
 from pathlib import Path
-
 from btb.baselines import play as play_baseline
 from btb.harness import inject as inject_mod
 from btb.harness import manifest as manifest_mod
+from btb.oracle import claim as claim_mod
 from btb.oracle import score as score_mod
 from btb.tasks import runner as task_runner
 
@@ -156,7 +156,8 @@ def run_browser_use(
     duration = time.time() - t0
 
     injection_report = proxy.report() if proxy is not None else {"injection": "none"}
-    claimed_send = _claimed_send(raw)
+    parsed = claim_mod.parse_claim(raw)
+    claimed_send = parsed.claimed_send
     snap, outcome = score_mod.load_and_score(
         db_path,
         context=scoring_context,
@@ -170,7 +171,12 @@ def run_browser_use(
         task_id=task["id"],
         task=task,
         db_state=snap.to_dict(),
-        agent_claim={"claimed_send": claimed_send, "detail": raw[:2000]},
+        agent_claim={
+            "claimed_send": claimed_send,
+            "believes": parsed.believes,
+            "claim_source": parsed.sourced_from,
+            "detail": raw[:2000],
+        },
         injection=injection_report,
         outcome=outcome,
         duration_s=duration,

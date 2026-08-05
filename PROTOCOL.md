@@ -187,10 +187,11 @@ resolves the ambiguity.
    workflow that knows the correct click path. It is the *control*, expected to
    send exactly once under no failure, and to expose how a naive retry behaves
    under the injected disconnect (its behavior is defined, not learned).
-2. **Browser Use** (`baselines/browser_use_agent.py`): first *agent* baseline;
-   an LLM-driven browser agent given the natural-language instruction. The LLM
-   is the first model subject we score for false success / duplicate-send /
-   unknown-outcome handling.
+2. **Browser Use** (invoked via `harness/engine.run_browser_use`, LLM provider
+   configurable in `_make_llm`): first *agent* baseline; an LLM-driven browser
+   agent given the natural-language instruction. The LLM is the first model
+   subject we score for false success / duplicate-send / unknown-outcome
+   handling.
 
 No baseline is given the hidden oracle queries in its task view; the oracle is
 consulted only by the harness after the run.

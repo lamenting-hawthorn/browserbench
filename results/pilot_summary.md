@@ -70,6 +70,28 @@ Manifests of the canonical post-fix runs:
 - `manifests/btb-msg_send_01_20260806_032603_5e54f0.json` (naive, send → sent_multiple)
 - `manifests/btb-msg_send_01_20260806_032921_a89d80.json` (browser-use, send)
 
+## Repeat statistics (de-flaked controls, freeze 0_0_2)
+
+After removing the hard-coded `600ms` settle (replaced with a deterministic poll
+in `btb/baselines/play.py`), the deterministic controls were repeated to confirm
+reproducibility and retire the partner-review N=1 / reproducibility-dune
+concerns (W1/W7):
+
+| Baseline × task | Runs | outcome distribution |
+|-----------------|------|----------------------|
+| `playwright-exact` / `msg_send_01` | 5 | `sent_once` ×5 (100%) |
+| `playwright-naive` / `msg_send_01` | 5 | `sent_multiple` ×5 (100%) |
+
+## Declarative claim contract (W3)
+
+The agent-belief metrics (`false_success`, `unknown_outcome`,
+`sent_but_agent_unaware`) are now parsed from an optional structured final-answer
+(`btb/oracle/claim.py`): an agent that emits `{"believes": "sent|not_sent|unknown"}`
+is scored from that declarative output; legacy transcripts fall back to a
+keyword heuristic. The DB oracle remains the only source of *effect* truth; the
+claim contract only refines the *agent belief* dimension. See
+`results/partner_review.md` W3 and the `tests/test_claim.py` coverage.
+
 ## Defects found & fixed
 
 See `results/pilot_defects.md` (5 harness/oracle bugs fixed in place; none
