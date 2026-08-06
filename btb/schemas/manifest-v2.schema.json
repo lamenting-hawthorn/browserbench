@@ -1,0 +1,366 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://browsertransactionbench.local/schemas/manifest-v2.schema.json",
+  "title": "BrowserTransactionBench manifest receipt v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "release",
+    "freeze",
+    "status",
+    "canonical",
+    "started_at",
+    "ended_at",
+    "duration_s",
+    "source",
+    "task",
+    "prompt",
+    "baseline",
+    "execution",
+    "agent_claim",
+    "trace",
+    "injection_report",
+    "before_snapshot",
+    "after_snapshot",
+    "evaluation",
+    "outcome",
+    "versions"
+  ],
+  "properties": {
+    "schema_version": {"const": "2.0"},
+    "run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,191}$"
+    },
+    "release": {"const": "0.1.0"},
+    "freeze": {"type": "string", "minLength": 1},
+    "status": {
+      "enum": [
+        "success",
+        "setup_error",
+        "baseline_error",
+        "timeout",
+        "evaluation_error"
+      ]
+    },
+    "canonical": {"type": "boolean"},
+    "started_at": {"type": "string", "format": "date-time"},
+    "ended_at": {"type": "string", "format": "date-time"},
+    "duration_s": {"type": "number", "minimum": 0},
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["git_commit", "git_dirty", "source_tree_sha256"],
+      "properties": {
+        "git_commit": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+        },
+        "git_dirty": {"type": "boolean"},
+        "source_tree_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "task": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["definition", "sha256"],
+      "properties": {
+        "definition": {"type": "object"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "prompt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["text", "sha256"],
+      "properties": {
+        "text": {"type": ["string", "null"]},
+        "sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "framework",
+        "provider",
+        "model",
+        "parameters",
+        "modality_policy",
+        "capability_policy"
+      ],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "framework": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "installed_version"],
+          "properties": {
+            "name": {"type": "string", "minLength": 1},
+            "installed_version": {"type": ["string", "null"]}
+          }
+        },
+        "provider": {"type": ["string", "null"]},
+        "model": {"type": ["string", "null"]},
+        "parameters": {"type": "object"},
+        "modality_policy": {"type": "object"},
+        "capability_policy": {"type": "object"}
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "configured_steps",
+        "configured_wall_s",
+        "requested_canonical",
+        "failure",
+        "evidence_failures"
+      ],
+      "properties": {
+        "configured_steps": {"type": ["integer", "null"], "minimum": 1},
+        "configured_wall_s": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "requested_canonical": {"type": "boolean"},
+        "evidence_failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "message", "stage"],
+            "properties": {
+              "type": {"type": "string", "minLength": 1},
+              "message": {"type": "string"},
+              "stage": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "failure": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["type", "message", "stage"],
+          "properties": {
+            "type": {"type": "string", "minLength": 1},
+            "message": {"type": "string"},
+            "stage": {"type": "string", "minLength": 1}
+          }
+        }
+      }
+    },
+    "agent_claim": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "believes",
+        "sourced_from",
+        "subject",
+        "body",
+        "parser_version",
+        "claimed_send",
+        "detail",
+        "detail_sha256",
+        "detail_redacted"
+      ],
+      "properties": {
+        "believes": {
+          "enum": ["sent", "not_sent", "unknown", "malformed", "absent"]
+        },
+        "sourced_from": {
+          "enum": ["structured", "control", "heuristic", "malformed", "absent"]
+        },
+        "subject": {"type": ["string", "null"]},
+        "body": {"type": ["string", "null"]},
+        "parser_version": {"const": "btb-claim-v1"},
+        "claimed_send": {"type": ["boolean", "null"]},
+        "detail": {"type": "string"},
+        "detail_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "detail_redacted": {"type": "boolean"}
+      }
+    },
+    "trace": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "format",
+        "path",
+        "sha256",
+        "size_bytes",
+        "complete",
+        "redacted"
+      ],
+      "properties": {
+        "kind": {"type": "string", "minLength": 1},
+        "format": {"type": "string", "minLength": 1},
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "complete": {"const": true},
+        "redacted": {"type": "boolean"}
+      }
+    },
+    "injection_report": {"type": ["object", "null"]},
+    "before_snapshot": {
+      "oneOf": [{"$ref": "#/$defs/snapshot"}, {"type": "null"}]
+    },
+    "after_snapshot": {
+      "oneOf": [{"$ref": "#/$defs/snapshot"}, {"type": "null"}]
+    },
+    "evaluation": {
+      "oneOf": [{"$ref": "#/$defs/evaluation"}, {"type": "null"}]
+    },
+    "outcome": {"type": ["string", "null"]},
+    "versions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["parser", "evaluator", "validator"],
+      "properties": {
+        "parser": {"const": "btb-claim-v1"},
+        "evaluator": {"const": "btb-full-state-v1"},
+        "validator": {"const": "btb-manifest-validator-v2"}
+      }
+    }
+  },
+  "$defs": {
+    "userRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": {"type": "integer"},
+        "name": {"type": "string"}
+      }
+    },
+    "draftRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "user_id",
+        "subject",
+        "body",
+        "status",
+        "created_at",
+        "updated_at"
+      ],
+      "properties": {
+        "id": {"type": "integer"},
+        "user_id": {"type": "integer"},
+        "subject": {"type": "string"},
+        "body": {"type": "string"},
+        "status": {"enum": ["new", "saved"]},
+        "created_at": {"type": "number"},
+        "updated_at": {"type": "number"}
+      }
+    },
+    "messageRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "user_id",
+        "draft_id",
+        "subject",
+        "body",
+        "send_uid",
+        "sent_at"
+      ],
+      "properties": {
+        "id": {"type": "integer"},
+        "user_id": {"type": "integer"},
+        "draft_id": {"type": ["integer", "null"]},
+        "subject": {"type": "string"},
+        "body": {"type": "string"},
+        "send_uid": {"type": "string", "minLength": 1},
+        "sent_at": {"type": "number"}
+      }
+    },
+    "attemptRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "draft_id", "send_uid", "outcome", "created_at"],
+      "properties": {
+        "id": {"type": "integer"},
+        "draft_id": {"type": "integer"},
+        "send_uid": {"type": "string", "minLength": 1},
+        "outcome": {"enum": ["committed", "duplicate_rejected"]},
+        "created_at": {"type": "number"}
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["users", "drafts", "messages", "send_attempts"],
+      "properties": {
+        "users": {"type": "array", "items": {"$ref": "#/$defs/userRow"}},
+        "drafts": {"type": "array", "items": {"$ref": "#/$defs/draftRow"}},
+        "messages": {"type": "array", "items": {"$ref": "#/$defs/messageRow"}},
+        "send_attempts": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/attemptRow"}
+        }
+      }
+    },
+    "evaluation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "functional_status",
+        "effect_state",
+        "authorization_violations",
+        "duplicate_attempt_count",
+        "belief",
+        "treatment_delivered",
+        "ambiguity_exposed",
+        "reconciliation_available",
+        "reconciliation_status",
+        "belief_calibration",
+        "headline_outcome",
+        "diagnostics"
+      ],
+      "properties": {
+        "functional_status": {"enum": ["pass", "fail", "unknown"]},
+        "effect_state": {
+          "enum": ["zero", "exactly_one", "multiple", "not_applicable"]
+        },
+        "authorization_violations": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "duplicate_attempt_count": {"type": "integer", "minimum": 0},
+        "belief": {
+          "enum": ["sent", "not_sent", "unknown", "malformed", "absent"]
+        },
+        "treatment_delivered": {"type": "boolean"},
+        "ambiguity_exposed": {"type": "boolean"},
+        "reconciliation_available": {"type": "boolean"},
+        "reconciliation_status": {
+          "enum": [
+            "not_applicable",
+            "not_attempted",
+            "attempt_failed",
+            "observed"
+          ]
+        },
+        "belief_calibration": {
+          "enum": [
+            "not_applicable",
+            "calibrated",
+            "miscalibrated",
+            "insufficient_evidence"
+          ]
+        },
+        "headline_outcome": {"type": "string", "minLength": 1},
+        "diagnostics": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

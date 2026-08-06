@@ -12,40 +12,22 @@ Endpoints:
   POST /api/drafts            -> create a draft      {subject, body}
   POST /api/drafts/{id}/save  -> save a draft
   POST /api/messages/send     -> send a draft        {draft_id, send_uid?}
-  GET  /health                -> health check
+  GET  /health                -> health check and fixture identity
 """
 
 from __future__ import annotations
 
-import logging
 import os
+import secrets
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Optional
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from btb.app import db
-
-logger = logging.getLogger("btb.app")
-
-DB_PATH = Path(os.environ.get("BTB_DB", str(db.DEFAULT_DB)))
-
-
-@asynccontextmanager
-async def lifespan(_app: FastAPI):
-    # Create schema + a seed user ONCE at startup (main event-loop thread).
-    db.init_db(DB_PATH, seed_user="alice")
-    yield
-
-
-app = FastAPI(
-    title="BrowserTransactionBench message fixture",
-    version="0.1.0",
-    lifespan=lifespan,
-)
 
 
 class DraftIn(BaseModel):
@@ -53,59 +35,122 @@ class DraftIn(BaseModel):
     body: str
 
 
-class SaveIn(BaseModel):
-    draft_id: int
-
-
 class SendIn(BaseModel):
     draft_id: int
-    send_uid: Optional[str] = None
+    send_uid: str | None = None
 
 
-@app.get("/health")
-def health() -> dict:
-    return {"ok": True, "db": str(DB_PATH)}
+def _canonical_database_path(database_path: Path | str) -> Path:
+    return Path(database_path).expanduser().resolve()
 
 
-@app.get("/")
-def index() -> FileResponse:
-    return FileResponse(Path(__file__).parent / "templates" / "index.html")
+def create_app(
+    database_path: Path | str,
+    *,
+    run_id: str | None = None,
+    ui_token: str | None = None,
+) -> FastAPI:
+    """Build an app bound permanently to one explicit SQLite database.
 
+    Request handlers close over the canonical path instead of consulting
+    mutable environment or module state. This lets multiple fixture apps run
+    concurrently without observing or resetting each other's databases.
+    """
+    canonical_database = _canonical_database_path(database_path)
+    capability_token = ui_token or secrets.token_urlsafe(32)
+    if not capability_token:
+        raise ValueError("ui_token must not be empty")
 
-@app.get("/api/drafts")
-def list_drafts() -> list[dict]:
-    return db.get_drafts(DB_PATH)
+    @asynccontextmanager
+    async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
+        # Create schema + a seed user once, before the server reports ready.
+        db.init_db(canonical_database, seed_user="alice")
+        yield
 
-
-@app.post("/api/drafts")
-def create_draft(payload: DraftIn) -> dict:
-    return db.create_draft(
-        DB_PATH, user_id=1, subject=payload.subject, body=payload.body
+    application = FastAPI(
+        title="BrowserTransactionBench message fixture",
+        version="0.1.0",
+        lifespan=lifespan,
     )
+    application.state.database_path = canonical_database
+    application.state.run_id = run_id
+    application.state.ui_token = capability_token
+
+    def require_visible_control(
+        supplied_token: str | None = Header(default=None, alias="X-BTB-UI-Token"),
+    ) -> None:
+        if not secrets.compare_digest(supplied_token or "", capability_token):
+            raise HTTPException(
+                status_code=403,
+                detail="fixture API is available only through visible page controls",
+            )
+
+    @application.get("/health")
+    def health() -> dict[str, object]:
+        return {"ok": True, "db": str(canonical_database), "run_id": run_id}
+
+    @application.get("/", response_class=HTMLResponse)
+    def index() -> HTMLResponse:
+        template = (Path(__file__).parent / "templates" / "index.html").read_text(
+            encoding="utf-8"
+        )
+        return HTMLResponse(template.replace("__BTB_UI_TOKEN__", capability_token))
+
+    @application.get("/api/drafts", dependencies=[Depends(require_visible_control)])
+    def list_drafts() -> list[dict]:
+        return db.get_drafts(canonical_database)
+
+    @application.post("/api/drafts", dependencies=[Depends(require_visible_control)])
+    def create_draft(payload: DraftIn) -> dict:
+        return db.create_draft(
+            canonical_database,
+            user_id=1,
+            subject=payload.subject,
+            body=payload.body,
+        )
+
+    @application.post(
+        "/api/drafts/{draft_id}/save",
+        dependencies=[Depends(require_visible_control)],
+    )
+    def save_draft(draft_id: int) -> dict:
+        try:
+            return db.save_draft(canonical_database, draft_id=draft_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="draft not found") from exc
+
+    @application.get("/api/messages", dependencies=[Depends(require_visible_control)])
+    def list_messages() -> list[dict]:
+        return db.messages(canonical_database)
+
+    @application.post(
+        "/api/messages/send",
+        dependencies=[Depends(require_visible_control)],
+    )
+    def send_message(payload: SendIn) -> dict:
+        """Commit the durable send before FastAPI serializes the response."""
+        try:
+            return db.send_message(
+                canonical_database,
+                draft_id=payload.draft_id,
+                send_uid=payload.send_uid,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="draft not found") from exc
+        except db.DraftNotSavedError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=f"draft {exc.draft_id} must be saved before sending",
+            ) from exc
+
+    return application
 
 
-@app.post("/api/drafts/{draft_id}/save")
-def save_draft(draft_id: int) -> dict:
-    try:
-        return db.save_draft(DB_PATH, draft_id=draft_id)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="draft not found")
-
-
-@app.get("/api/messages")
-def list_messages() -> list[dict]:
-    return db.messages(DB_PATH)
-
-
-@app.post("/api/messages/send")
-def send_message(payload: SendIn) -> dict:
-    """Send is durable BEFORE this returns: the DB commit happens in db.py and
-    the row is committed before FastAPI serializes the response. An external
-    injection may drop the response body — the DB already has the truth."""
-    try:
-        return db.send_message(DB_PATH, draft_id=payload.draft_id, send_uid=payload.send_uid)
-    except KeyError:
-        raise HTTPException(status_code=404, detail="draft not found")
+# Keep import-based ASGI hosting and ``python btb/app/server.py`` behavior. The
+# environment is read once; factory-created apps never consult these globals.
+DB_PATH = _canonical_database_path(os.environ.get("BTB_DB", str(db.DEFAULT_DB)))
+RUN_ID = os.environ.get("BTB_RUN_ID") or None
+app = create_app(DB_PATH, run_id=RUN_ID)
 
 
 def main() -> None:

@@ -13,10 +13,20 @@ from pathlib import Path
 from btb.app import db
 
 DEFINITIONS_DIR = Path(__file__).parent / "definitions"
+PILOT_TASKS = (
+    "msg_read_01",
+    "msg_draft_save_01",
+    "msg_send_01",
+    "msg_send_neutral_01",
+)
 
 
 def load_definition(task_id: str) -> dict:
+    if not isinstance(task_id, str) or not task_id or Path(task_id).name != task_id:
+        raise ValueError("task_id must be one plain filename stem")
     path = DEFINITIONS_DIR / f"{task_id}.json"
+    if not path.is_file():
+        raise ValueError(f"unknown task_id: {task_id}")
     with open(path) as fh:
         return json.load(fh)
 

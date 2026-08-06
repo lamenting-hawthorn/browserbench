@@ -66,6 +66,15 @@ CREATE INDEX IF NOT EXISTS idx_drafts_user ON drafts(user_id);
 DEFAULT_DB = Path(__file__).parent / "btb.db"
 
 
+class DraftNotSavedError(RuntimeError):
+    """Raised when an outbound send is attempted from a non-saved draft."""
+
+    def __init__(self, draft_id: int, status: str) -> None:
+        self.draft_id = draft_id
+        self.status = status
+        super().__init__(f"draft {draft_id} must be saved before sending (status={status!r})")
+
+
 def _now() -> float:
     return time.time()
 
@@ -219,47 +228,86 @@ def send_message(
     constraint rejects it and the attempt is logged as 'duplicate_rejected'.
     """
     conn = connect(path)
-    t = _now()
-    uid = send_uid or new_send_uid()
-    draft = conn.execute("SELECT * FROM drafts WHERE id=?", (draft_id,)).fetchone()
-    if draft is None:
-        conn.close()
-        raise KeyError(f"draft {draft_id} not found")
-
     try:
-        cur = conn.execute(
-            "INSERT INTO messages (user_id, draft_id, subject, body, send_uid, sent_at) "
-            "VALUES (?,?,?,?,?,?)",
-            (draft["user_id"], draft_id, draft["subject"], draft["body"], uid, t),
-        )
-    except sqlite3.IntegrityError:
-        # Same uid already committed -> duplicate attempt, idempotency backstop.
+        t = _now()
+        uid = send_uid or new_send_uid()
+        draft = conn.execute("SELECT * FROM drafts WHERE id=?", (draft_id,)).fetchone()
+        if draft is None:
+            raise KeyError(f"draft {draft_id} not found")
+        if draft["status"] != "saved":
+            # This check deliberately precedes both durable inserts. An invalid
+            # outbound action therefore leaves neither a message nor an attempt.
+            raise DraftNotSavedError(draft_id, draft["status"])
+
+        try:
+            cur = conn.execute(
+                "INSERT INTO messages (user_id, draft_id, subject, body, send_uid, sent_at) "
+                "VALUES (?,?,?,?,?,?)",
+                (draft["user_id"], draft_id, draft["subject"], draft["body"], uid, t),
+            )
+        except sqlite3.IntegrityError as exc:
+            # Do not turn unrelated NOT NULL, FK, or CHECK failures into an
+            # apparent idempotency success. Both SQLite's extended error name
+            # and the colliding durable row must identify this exact UNIQUE hit.
+            collision = conn.execute(
+                "SELECT id FROM messages WHERE send_uid=?", (uid,)
+            ).fetchone()
+            if (
+                getattr(exc, "sqlite_errorname", None) != "SQLITE_CONSTRAINT_UNIQUE"
+                or collision is None
+            ):
+                conn.rollback()
+                raise
+            conn.execute(
+                "INSERT INTO send_attempts (draft_id, send_uid, outcome, created_at) "
+                "VALUES (?,?, 'duplicate_rejected', ?)",
+                (draft_id, uid, t),
+            )
+            conn.commit()
+            return {"committed": False, "duplicate_rejected": True, "send_uid": uid}
+
+        msg_id = cur.lastrowid
         conn.execute(
             "INSERT INTO send_attempts (draft_id, send_uid, outcome, created_at) "
-            "VALUES (?,?, 'duplicate_rejected', ?)",
+            "VALUES (?,?, 'committed', ?)",
             (draft_id, uid, t),
         )
         conn.commit()
+        row = conn.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
+        assert row is not None
+        return {"committed": True, "duplicate_rejected": False, "message": dict(row)}
+    finally:
         conn.close()
-        return {"committed": False, "duplicate_rejected": True, "send_uid": uid}
-
-    msg_id = cur.lastrowid
-    conn.execute(
-        "INSERT INTO send_attempts (draft_id, send_uid, outcome, created_at) "
-        "VALUES (?,?, 'committed', ?)",
-        (draft_id, uid, t),
-    )
-    conn.commit()
-    msg = dict(
-        conn.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
-    )
-    conn.close()
-    return {"committed": True, "duplicate_rejected": False, "message": msg}
 
 
 # ---------------------------------------------------------------------------
 # Oracle queries (authoritative read-only views the harness uses for scoring)
 # ---------------------------------------------------------------------------
+
+def full_snapshot(path: Path | str = DEFAULT_DB) -> dict[str, list[dict]]:
+    """Read all durable tables from one atomic, explicitly bounded transaction.
+
+    Rows are ordered by primary key and converted to plain dictionaries so the
+    returned state is deterministic and directly JSON serializable.
+    """
+    conn = connect(path)
+    try:
+        conn.execute("BEGIN")
+        state = {
+            table: [
+                dict(row)
+                for row in conn.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()
+            ]
+            for table in ("users", "drafts", "messages", "send_attempts")
+        }
+        conn.commit()
+        return state
+    except BaseException:
+        if conn.in_transaction:
+            conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 def count_sent(path: Path | str = DEFAULT_DB, *, user_id: int = 1) -> int:
     conn = connect(path)

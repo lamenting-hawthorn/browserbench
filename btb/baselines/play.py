@@ -20,8 +20,6 @@ automation and never consults the oracle directly.
 from __future__ import annotations
 
 
-
-
 class PlayControl:
     """Deterministic control driver over a live page."""
 
@@ -50,15 +48,45 @@ class PlayControl:
                     pass
         return ids
 
+    @staticmethod
+    def _is_send_request(request) -> bool:
+        return request.method == "POST" and request.url.split("?", 1)[0].endswith(
+            "/api/messages/send"
+        )
+
+    def _click_and_wait_for_dropped_send(self) -> None:
+        with self.page.expect_event(
+            "requestfailed",
+            predicate=self._is_send_request,
+        ):
+            self._click("#send")
+
+    def _click_and_wait_for_successful_send(self) -> None:
+        with self.page.expect_response(
+            lambda response: self._is_send_request(response.request)
+        ) as response_info:
+            self._click("#send")
+        if not response_info.value.ok:
+            raise RuntimeError(
+                f"retry returned HTTP {response_info.value.status} instead of success"
+            )
+        self.page.locator("#msg").filter(has_text="Message sent").wait_for()
+
     # -- task routines ------------------------------------------------------
     def msg_read(self) -> dict:
         self.page.goto(self.base_url + "/")
         self.page.wait_for_selector("ul#drafts li")
-        subject = self.page.locator("#drafts li").first.inner_text()
+        rendered = self.page.locator("#drafts li").first.inner_text()
+        content = rendered.split(" — ", 1)[-1]
+        subject, separator, body = content.partition(": ")
+        if not separator:
+            subject, body = content, ""
         return {
             "operation": "report",
-            "claimed_send": False,
-            "detail": f"read draft: {subject}",
+            "believes": "not_sent",
+            "subject": subject,
+            "body": body,
+            "detail": f"read draft: {rendered}",
         }
 
     def msg_draft_save(self, subject: str, body: str) -> dict:
@@ -70,34 +98,21 @@ class PlayControl:
         self.page.wait_for_selector("ul#drafts li")
         # select the first (just-created) draft
         self.page.locator("ul#drafts li").first.click()
+        draft_ids = self._draft_ids()
+        if len(draft_ids) != 1:
+            raise RuntimeError(f"expected one created draft, observed {draft_ids!r}")
         self._click("#save")
-        self.page.wait_for_selector("#msg")
-        return {"operation": "save", "claimed_send": False, "detail": "created+selected+saved"}
-
-    def _wait_sent_settled(self, max_wait_s: float = 2.5, stable_s: float = 0.3) -> int:
-        """Poll #sent li until its count is stable, then return it.
-
-        Load-insensitive replacement for a fixed sleep: refreshSent() fills the
-        Sent list asynchronously after reload, so we wait until the count stops
-        changing rather than sleeping an arbitrary amount.
-        """
-        import time as _time
-
-        deadline = _time.monotonic() + max_wait_s
-        last_count = self.page.locator("#sent li").count()
-        last_change = _time.monotonic()
-        while _time.monotonic() < deadline:
-            if self.page.locator("#sent li").count() != last_count:
-                last_count = self.page.locator("#sent li").count()
-                last_change = _time.monotonic()
-            if _time.monotonic() - last_change >= stable_s:
-                break
-            self.page.wait_for_timeout(50)
-        return last_count
+        self.page.locator("#msg").filter(
+            has_text=f"Draft {draft_ids[0]} saved."
+        ).wait_for()
+        return {
+            "operation": "save",
+            "believes": "not_sent",
+            "detail": "created+selected+saved",
+        }
 
     def msg_send(self) -> dict:
-        """Send the (single) saved draft, applying the configured behavior when
-        the send response is dropped by the injection.
+        """Send the single saved draft under the configured disconnect behavior.
 
         ``exact`` (well-behaved / reconciliation): after a dropped response,
         RELOAD the page so the app re-reads its own /api/messages (authoritative
@@ -115,35 +130,38 @@ class PlayControl:
 
         self.page.goto(self.base_url + "/")
         _select_first_draft()
-        self._click("#send")
+        self._click_and_wait_for_dropped_send()
 
         # naive_retry: blind retry
         if self.behavior == "naive_retry":
-            self.page.wait_for_timeout(300)
             _select_first_draft()
-            self._click("#send")
-            return {"operation": "send", "claimed_send": True, "detail": "blind retried once"}
+            self._click_and_wait_for_successful_send()
+            return {
+                "operation": "send",
+                "believes": "sent",
+                "detail": "blind retried once",
+            }
 
         # exact: reconcile by reloading and reading the Sent list through the UI.
-        self.page.wait_for_timeout(300)
         self.page.goto(self.base_url + "/")  # re-runs refresh()+refreshSent()
-        # Ensure the page loaded AND the async refreshSent() has populated the
-        # Sent list before counting it (deterministic settle, not a fixed sleep).
+        # Wait for the visible product's reconciliation read to finish before
+        # deciding whether a retry is safe.
         self.page.wait_for_selector("ul#drafts li")
-        sent_before = self._wait_sent_settled()
+        self.page.wait_for_selector("#sent[data-loaded='true']")
+        sent_before = self.page.locator("#sent li").count()
         if sent_before >= 1:
             # Effect already durable; do NOT retry. Exactly-once preserved.
             return {
                 "operation": "send",
-                "claimed_send": True,
+                "believes": "sent",
                 "detail": f"reconciled: message present (sent list count={sent_before}), no retry",
             }
         # Absent: retry once after reconciliation.
         _select_first_draft()
-        self._click("#send")
+        self._click_and_wait_for_successful_send()
         return {
             "operation": "send",
-            "claimed_send": True,
+            "believes": "sent",
             "detail": "reconciled: absent after disconnect, retried once",
         }
 
@@ -154,8 +172,11 @@ def run_control(page, base_url: str, task: dict, behavior: str = "exact") -> dic
     if effect == "read":
         return ctrl.msg_read()
     if effect == "save":
-        # For save tasks, the instruction is to create + save "Launch Notes".
-        return ctrl.msg_draft_save("Launch Notes", "Ship tomorrow at 09:00.")
+        expected_drafts = (task.get("intended_final") or {}).get("drafts") or []
+        if len(expected_drafts) != 1:
+            raise ValueError("save control requires one exact intended draft")
+        expected = expected_drafts[0]
+        return ctrl.msg_draft_save(expected["subject"], expected["body"])
     if effect == "send":
         return ctrl.msg_send()
-    return {"operation": "none", "claimed_send": False, "detail": f"unhandled {effect}"}
+    raise ValueError(f"unsupported deterministic-control effect class: {effect!r}")

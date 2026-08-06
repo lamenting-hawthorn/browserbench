@@ -42,10 +42,14 @@
 
   <script>
     let currentDraftId = null;
+    const btbUiToken = "__BTB_UI_TOKEN__";
 
     async function api(path, opts = {}) {
       const r = await fetch(path, {
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "X-BTB-UI-Token": btbUiToken
+        },
         ...opts
       });
       return r.json();
@@ -67,14 +71,18 @@
 
     async function refreshSent() {
       const sent = document.getElementById("sent");
-      const r = await fetch("/api/messages");
+      sent.dataset.loaded = "false";
+      const r = await fetch("/api/messages", {
+        headers: { "X-BTB-UI-Token": btbUiToken }
+      });
       if (r.ok) { const msgs = await r.json();
         sent.innerHTML = "";
         msgs.forEach((m) => {
           const li = document.createElement("li");
           li.textContent = `${m.subject}: ${m.body}`;
           sent.appendChild(li);
-        }); }
+        });
+        sent.dataset.loaded = "true"; }
     }
 
     document.getElementById("create").addEventListener("click", async () => {
@@ -92,8 +100,7 @@
 
     document.getElementById("save").addEventListener("click", async () => {
       if (currentDraftId == null) { document.getElementById("msg").textContent = "Select a draft first."; return; }
-      const r = await api("/api/drafts/" + currentDraftId + "/save", { method: "POST",
-        body: JSON.stringify({ draft_id: currentDraftId }) });
+      const r = await api("/api/drafts/" + currentDraftId + "/save", { method: "POST" });
       if (r.detail) { document.getElementById("msg").textContent = "Error: " + r.detail; }
       else { document.getElementById("msg").textContent = "Draft " + currentDraftId + " saved."; }
       await refresh();

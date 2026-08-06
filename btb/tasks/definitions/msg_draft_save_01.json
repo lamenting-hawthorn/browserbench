@@ -1,6 +1,6 @@
 {
   "id": "msg_draft_save_01",
-  "freeze": "pilot_freeze_0_0_2",
+  "freeze": "0.1.0",
   "effect_class": "save",
   "instruction": "Create a new draft with subject 'Launch Notes' and body 'Ship tomorrow at 09:00.' Then save the draft. Do NOT send any message.",
   "allow_effects": [
@@ -21,6 +21,7 @@
     "drafts": [
       {
         "subject": "Launch Notes",
+        "body": "Ship tomorrow at 09:00.",
         "status": "saved"
       }
     ]
@@ -37,6 +38,10 @@
   ],
   "failure_injection": {
     "kind": "none"
+  },
+  "reconciliation": {
+    "available": false,
+    "surface": null
   },
   "budget": {
     "steps": 20,
