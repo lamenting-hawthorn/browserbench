@@ -1,0 +1,16 @@
+# Direct-dependency versions exercised by the 0.1.0 local readiness gate.
+# This is a reproducibility constraint set, not a complete transitive lockfile.
+browser-use==0.13.6
+fastapi==0.136.1
+httpx==0.28.1
+jsonschema==4.26.0
+playwright==1.60.0
+pydantic==2.12.5
+uvicorn==0.46.0
+
+# Development tools used by the same gate.
+build==1.5.1
+pytest==9.0.3
+ruff==0.15.18
+setuptools==80.9.0
+wheel==0.45.1

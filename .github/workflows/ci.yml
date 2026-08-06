@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install test environment
+        run: >-
+          python -m pip install
+          --constraint constraints/runtime-0.1.0.txt
+          -e ".[dev]"
+      - name: Lint
+        run: python -m ruff check .
+      - name: Test without cache
+        run: python -m pytest -q -p no:cacheprovider
+      - name: Independent verifier smoke
+        run: python .verify/pilot_verifier.py
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Build distributions
+        run: |
+          python -m pip install --constraint constraints/runtime-0.1.0.txt build setuptools wheel
+          python -m build --no-isolation
+      - name: Verify wheel in a clean environment
+        run: |
+          python -m venv "$RUNNER_TEMP/btb-wheel"
+          "$RUNNER_TEMP/btb-wheel/bin/pip" install --constraint constraints/runtime-0.1.0.txt dist/*.whl
+          "$RUNNER_TEMP/btb-wheel/bin/btb-run" --list
+          "$RUNNER_TEMP/btb-wheel/bin/btb-validate" --help
+          "$RUNNER_TEMP/btb-wheel/bin/python" -c "from pathlib import Path; import btb.app.server as s; import btb.harness.validate_manifest as v; import btb.tasks.runner as t; assert Path(s.__file__).with_name('templates').joinpath('index.html').is_file(); assert v.DEFAULT_SCHEMA_PATH.is_file(); assert t.load_definition('msg_send_01')['id'] == 'msg_send_01'"
+      - name: Verify optional learned-baseline API contract
+        env:
+          ANONYMIZED_TELEMETRY: "false"
+        run: |
+          "$RUNNER_TEMP/btb-wheel/bin/pip" install --constraint constraints/runtime-0.1.0.txt "dist/browsertransactionbench-0.1.0-py3-none-any.whl[baselines]"
+          "$RUNNER_TEMP/btb-wheel/bin/python" -c "from btb.harness import engine; from browser_use import Agent, Browser, Tools; c=engine.BrowserUseConfig(provider='deepseek', model='deepseek-chat', max_steps=5, wall_s=10); llm=engine._make_llm(c, api_key='test-only'); origin=engine._fixture_origin_pattern('http://127.0.0.1:4321'); browser=Browser(headless=True, accept_downloads=False, allowed_domains=[origin], captcha_solver=False, cross_origin_iframes=False, deterministic_rendering=True, enable_default_extensions=False, permissions=[]); tools=engine._make_browser_tools(Tools, c); agent=Agent(task='Open http://127.0.0.1:4321/ and return exactly {\"believes\":\"unknown\"}', browser=browser, llm=llm, tools=tools, directly_open_url=True, available_file_paths=[], use_judge=False, use_vision=False); assert agent is not None; assert browser.browser_profile.allowed_domains == [origin]"
+
+  managed-browser-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install benchmark and Chromium
+        run: |
+          python -m pip install --constraint constraints/runtime-0.1.0.txt -e .
+          python -m playwright install --with-deps chromium
+      - name: Exercise exact and naive injected controls
+        run: |
+          receipt_dir="$RUNNER_TEMP/btb-receipts"
+          btb-run --task msg_send_01 --baseline playwright-exact --baseline playwright-naive --receipt-dir "$receipt_dir"
+          btb-validate "$receipt_dir"

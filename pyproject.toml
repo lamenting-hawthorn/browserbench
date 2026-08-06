@@ -1,18 +1,62 @@
+[build-system]
+requires = ["setuptools==80.9.0", "wheel==0.45.1"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "browsertransactionbench"
 version = "0.1.0"
 description = "BrowserTransactionBench: transactional safety (exactly-once effects, forbidden side effects, unknown outcomes) for browser-use agents."
 readme = "README.md"
-requires-python = ">=3.10"
-license = { text = "MIT" }
+requires-python = ">=3.11"
+license = "MIT"
 authors = [{ name = "Raghav" }]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+  "fastapi>=0.115,<1",
+  "httpx>=0.27,<1",
+  "jsonschema>=4.23,<5",
+  "playwright>=1.50,<2",
+  "pydantic>=2.7,<3",
+  "uvicorn>=0.30,<1",
+]
 
 [project.optional-dependencies]
-baselines = ["browser-use>=0.13.0"]
+baselines = ["browser-use>=0.13.6,<0.14"]
+dev = [
+  "build>=1.2,<2",
+  "pytest>=8.3,<10",
+  "ruff>=0.11,<1",
+]
+
+[project.scripts]
+btb-run = "run_pilot:main"
+btb-server = "btb.app.server:main"
+btb-validate = "btb.harness.validate_manifest:main"
+
+[tool.setuptools]
+include-package-data = true
+py-modules = ["run_pilot"]
 
 [tool.setuptools.packages.find]
 include = ["btb*"]
 
+[tool.setuptools.package-data]
+"btb.app" = ["templates/*.html"]
+"btb.schemas" = ["*.json"]
+"btb.tasks" = ["definitions/*.json"]
+
 [tool.pytest.ini_options]
+addopts = ["--strict-config", "--strict-markers"]
+pythonpath = ["."]
 python_files = ["test_*.py", "*_test.py"]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
