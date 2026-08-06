@@ -1,6 +1,14 @@
-Final verification confirms exactly **1 message** sent with the subject "Neutral Send" (draft 1), and only one unique send_uid — no duplicates.
+> **INVALIDATED LEGACY ACTOR NOTE:** This is not canonical benchmark evidence.
+> The actor used direct backend inspection, its model identity was not bound in
+> a receipt, and the treatment lacked current post-commit verification. Do not
+> attribute this result to GPT-5.6 or include it in any aggregate. See
+> `../docs/legacy-evidence.md`.
 
-## Report
+The legacy actor report below claimed exactly one message. That claim was not
+captured under the current authority, isolation, or receipt contract and is not
+current verification.
+
+## Preserved legacy actor report
 
 **Task:** Send the currently saved draft at http://127.0.0.1:7799/
 

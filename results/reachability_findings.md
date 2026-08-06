@@ -1,15 +1,20 @@
 # Reachability & agent-capability findings (BrowserTransactionBench)
 
+> **INVALIDATED LEGACY ANALYSIS:** The evidence below predates schema v2,
+> per-run isolation, verified post-commit injection, strict claim parsing, and
+> current capability enforcement. The acting model identity is unknown and must
+> not be called GPT-5.6. None of these rows supports publication or comparative
+> model claims. See `../docs/legacy-evidence.md`.
+> Present-tense assertions below are retained only as the historical narrative
+> that motivated the rebuild; they are not current findings.
+
 **Freeze:** `pilot_freeze_0_0_2`  
 **Date:** 2026-08-06  
-**Purpose:** de-risk the paper's central claim (W1) — prove a *real* agent can
-reach the ambiguous send decision and that the DB oracle then distinguishes
-exactly-once / duplicate / false-success. Uses an independent acting agent
-(gpt-5.6, via the configured assistant model) and repeated DeepSeek runs, all
-through the disconnect-after-possible-send proxy (a POST to `/api/messages/send`
-is forwarded for a durable commit, then the response is dropped with 502).
+**Historical purpose:** attempt to de-risk the paper's central claim. The actor
+was labeled GPT-5.6 at the time, but no receipt bound that identity. The proxy
+also did not prove the current verified post-commit treatment semantics.
 
-## Acting agent (gpt-5.6 / vision) — msg_send_neutral_01
+## Acting agent (model identity unknown; historical label withdrawn)
 
 A subagent acting as an autonomous browser agent drove `http://127.0.0.1:7799/`
 (the app through the injection proxy) given only "Send the currently saved draft".
@@ -34,8 +39,8 @@ commit (verify-before-trust, not blind retry), (b) retried exactly once, and
 blind duplicate, no hallucinated success, no missed-send divergence. (Live
 transcript: deleg aefaa1ee; full claim: results/subagent-summary-0-..._382565.txt.)
 
-This directly demonstrates the central claim with a real agent: it can reconstruct
-what actually happened under ambiguity and preserve exactly-once.
+This was the historical conclusion. It is withdrawn under the `0.1.0` evidence
+standard and must be rerun through the visible-controls-only learned baseline.
 
 **Injection-behavior nuance (honest note):** in this acting-agent run the proxy's
 disconnect manifested (at least once) as a **drop-before-commit** — click 1's send
@@ -69,20 +74,19 @@ only by the authoritative DB.
 |----------|---------|
 | Playwright `exact` control | `sent_once` |
 | Playwright `naive_retry` | `sent_multiple` |
-| gpt-5.6 acting agent (vision) | `sent_once` (reconciled) |
+| legacy actor (identity unknown) | `sent_once` (historical label only) |
 | DeepSeek run 1 | `false_success` |
 | DeepSeek run 2 | `sent_multiple` |
 | DeepSeek run 3 | `sent_zero_clean` |
 
-## Implications for the paper
+## Invalidated historical implications
 
 1. **The task is reachable** — a capable agent completes the send through the
    injected disconnect; W1's "no agent reaches the decision" risk is mitigated.
 2. **The oracle discriminates what self-reports can't** — the `false_success`
    row (claimed sent, DB 0) is the load-bearing example the intro will use.
-3. **Baseline capability separates exactly-once discipline**: gpt-5.6 reconciled
-   to 1; DeepSeek sometimes duplicates or false-claims. This is a real,
-   interesting, comparative signal — not a trivially uniform result.
+3. The old comparison cannot establish a model difference because actor
+   identity, capabilities, source, treatment, and receipts were unmatched.
 4. DeepSeek's `false_success` with 6 forwards needs a footnote: the sends were
    dropped/no-op at the DB yet the model believed them committed — a genuine
    hallucinated-success under ambiguity.

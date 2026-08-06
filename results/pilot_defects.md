@@ -1,12 +1,16 @@
 # Pilot defects log (BrowserTransactionBench)
 
+> **HISTORICAL DEFECT LOG:** Retained for engineering audit only. Its freeze
+> assertions and associated receipts are superseded by the `0.1.0` contract;
+> this file is not result evidence. See `../docs/legacy-evidence.md`.
+
 Recording harness/oracle **bugs found during the pilot** (not agent-model
 behaviors). All were fixed in place; this log is kept for honesty and for the
 independent review (PROTOCOL §13). Each entry: symptom → root cause → fix.
 
-Status header: **freeze `pilot_freeze_0_0_1` was defined BEFORE these fixes;
-none of these change the research question, task contract, or scoring classes —
-they are implementation defects, so the freeze holds.**
+Original status assertion: the document claimed that freeze
+`pilot_freeze_0_0_1` still held. That assertion is withdrawn. The fixes changed
+evidence semantics materially, and `0.1.0` supersedes the old freeze.
 
 ---
 

@@ -1,5 +1,9 @@
 # Publication-gap & literature report (BrowserTransactionBench)
 
+> **HISTORICAL RESEARCH SNAPSHOT:** Useful as planning context only. It predates
+> the `0.1.0` integrity contract and must not be treated as current benchmark
+> evidence or a completed publication review. See `../docs/legacy-evidence.md`.
+
 **Source:** independent research subagent (arxiv API + browser verification), 2026-08-06.
 **Purpose:** ground the paper intro and preempt novelty-threat reviewers.
 
@@ -51,8 +55,9 @@ Canonical browser benchmarks to contrast ("functional success ≠ transactional"
 
 False-success / verifier-failure hook:
 - **ToolEmu** — **2407.21745**; **AgentBoard** — **2412.13189** (over-optimistic
-  graders); **ProcBench** — **2507.20482** (machine-checkable success). Our DB
-  oracle is a perfect verifier that removes judge/LLM-grader false success.
+  graders); **ProcBench** — **2507.20482** (machine-checkable success). A BTB
+  fixture oracle is an authoritative synthetic-domain verifier rather than an
+  LLM judge; it is not claimed to be perfect.
 
 Closest methodological precedent (DB-as-oracle, other interface):
 - **IDB-Bench** — **2410.05074**. Uses the DB as ground truth but agent interface
@@ -84,7 +89,8 @@ interface. This conjunction is the novelty.
    truth (repeat sends pass; LLM-judges hallucinate; silence under interruption).
 2. **Name threat-of-novelty papers explicitly** and differentiate in 2-3 sentences.
    Add a "Relationship to concurrent work" paragraph.
-3. Position along **3 axes**: (i) Measurement (DB oracle = perfect verifier),
+3. Position along **3 axes**: (i) Measurement (authoritative fixture-state
+   verifier rather than an LLM judge),
    (ii) Task class (browser, real DOM), (iii) Stress dimension (interruption/
    disconnect/verifier-failure/Stop as first-class injected conditions).
 4. Define **outcome categories explicitly** (exactly-once / at-least-once / at-

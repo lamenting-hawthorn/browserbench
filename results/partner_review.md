@@ -1,5 +1,9 @@
 # Independent research-partner review (adversarial)
 
+> **HISTORICAL REVIEW:** This review informed the integrity rebuild. Any result
+> claims or freeze references in it are superseded by `0.1.0` and are not
+> canonical evidence. See `../docs/legacy-evidence.md`.
+
 **Source:** independent critical-review subagent that read the actual repo files,
 2026-08-06. Verdict up front: **the harness is well-engineered and the
 fixture/oracle idea is genuinely good — but the pilot's headline "research
