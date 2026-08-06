@@ -56,6 +56,34 @@ _BROWSER_USE_ALLOWED_ACTIONS = (
     "select_dropdown",
     "wait",
 )
+_BROWSER_USE_FULL_EXCLUDED_ACTIONS = (
+    "evaluate",
+    "read_file",
+    "replace_file",
+    "save_as_pdf",
+    "upload_file",
+    "write_file",
+)
+_BROWSER_USE_FULL_ALLOWED_ACTIONS = (
+    "click",
+    "close",
+    "done",
+    "dropdown_options",
+    "extract",
+    "find_elements",
+    "find_text",
+    "go_back",
+    "input",
+    "navigate",
+    "screenshot",
+    "scroll",
+    "search",
+    "search_page",
+    "select_dropdown",
+    "send_keys",
+    "switch",
+    "wait",
+)
 
 
 @dataclass(frozen=True)
@@ -78,10 +106,15 @@ class BrowserUseConfig:
     model: str
     max_steps: int
     wall_s: float
+    name: str = "browser-use"
     temperature: float = 0.0
     max_output_tokens: int = 4096
     provider_retries: int = 0
     excluded_actions: tuple[str, ...] = _BROWSER_USE_EXCLUDED_ACTIONS
+    allowed_actions: tuple[str, ...] = _BROWSER_USE_ALLOWED_ACTIONS
+    use_vision: bool = False
+    use_judge: bool = False
+    max_actions_per_step: int | None = None
 
 
 @dataclass(frozen=True)
@@ -149,7 +182,10 @@ def resolve_browser_use_config(
     provider: str | None,
     model: str | None,
     max_steps: int | None,
+    name: str = "browser-use",
 ) -> BrowserUseConfig:
+    if name not in {"browser-use", "browser-use-full"}:
+        raise ValueError(f"unsupported Browser Use baseline: {name}")
     resolved_provider = (provider or os.environ.get("BTB_LLM", "deepseek")).strip().lower()
     if resolved_provider not in _PROVIDER_DEFAULT_MODELS:
         raise ValueError(f"unsupported Browser Use LLM provider: {resolved_provider}")
@@ -172,49 +208,70 @@ def resolve_browser_use_config(
         raise TypeError("task budget.wall_s must be numeric")
     if wall_s <= 0:
         raise ValueError("task budget.wall_s must be positive")
+    if name == "browser-use-full":
+        policy = {
+            "excluded_actions": _BROWSER_USE_FULL_EXCLUDED_ACTIONS,
+            "allowed_actions": _BROWSER_USE_FULL_ALLOWED_ACTIONS,
+            "use_vision": True,
+            "use_judge": False,
+            "max_actions_per_step": 8,
+        }
+    else:
+        policy = {
+            "excluded_actions": _BROWSER_USE_EXCLUDED_ACTIONS,
+            "allowed_actions": _BROWSER_USE_ALLOWED_ACTIONS,
+            "use_vision": False,
+            "use_judge": False,
+            "max_actions_per_step": None,
+        }
     return BrowserUseConfig(
+        name=name,
         provider=resolved_provider,
         model=resolved_model,
         max_steps=resolved_steps,
         wall_s=float(wall_s),
+        **policy,
     )
 
 
 def _browser_use_provenance(
     config: BrowserUseConfig,
 ) -> manifest_mod.BaselineProvenance:
+    parameters: dict[str, object] = {
+        "max_steps": config.max_steps,
+        "wall_s": config.wall_s,
+        "wall_budget_enforced": True,
+        "headless": True,
+        "browser_profile": {
+            "accept_downloads": False,
+            "allowed_origins": "run_fixture_only",
+            "captcha_solver": False,
+            "cross_origin_iframes": False,
+            "default_extensions": False,
+            "deterministic_rendering": True,
+        },
+        "use_judge": config.use_judge,
+        "use_vision": config.use_vision,
+        "directly_open_url": True,
+        "excluded_actions": list(config.excluded_actions),
+        "llm_generation": {
+            "temperature": config.temperature,
+            "max_output_tokens": config.max_output_tokens,
+            "provider_retries": config.provider_retries,
+            "top_p": None,
+            "seed": None,
+        },
+    }
+    if config.max_actions_per_step is not None:
+        parameters["max_actions_per_step"] = config.max_actions_per_step
     return manifest_mod.BaselineProvenance(
-        name="browser-use",
+        name=config.name,
         framework_name="browser-use",
         framework_version=_installed_version("browser-use"),
         provider=config.provider,
         model=config.model,
-        parameters={
-            "max_steps": config.max_steps,
-            "wall_s": config.wall_s,
-            "wall_budget_enforced": True,
-            "headless": True,
-            "browser_profile": {
-                "accept_downloads": False,
-                "allowed_origins": "run_fixture_only",
-                "captcha_solver": False,
-                "cross_origin_iframes": False,
-                "default_extensions": False,
-                "deterministic_rendering": True,
-            },
-            "use_judge": False,
-            "use_vision": False,
-            "directly_open_url": True,
-            "excluded_actions": list(config.excluded_actions),
-            "llm_generation": {
-                "temperature": config.temperature,
-                "max_output_tokens": config.max_output_tokens,
-                "provider_retries": config.provider_retries,
-                "top_p": None,
-                "seed": None,
-            },
-        },
-        modality_policy={"dom": True, "vision": False},
+        parameters=parameters,
+        modality_policy={"dom": True, "vision": config.use_vision},
         capability_policy={
             "visible_page_controls_only": True,
             "javascript_console": False,
@@ -222,7 +279,7 @@ def _browser_use_provenance(
             "filesystem": False,
             "database": False,
             "enforcement": {
-                "agent_tools_allowed": list(_BROWSER_USE_ALLOWED_ACTIONS),
+                "agent_tools_allowed": list(config.allowed_actions),
                 "agent_tools_excluded": list(config.excluded_actions),
                 "fixture_write_api_requires_ui_token": True,
                 "navigation": "run_fixture_origin_only",
@@ -269,12 +326,13 @@ def receipt_builder_for(
 ) -> manifest_mod.ReceiptBuilder:
     """Resolve one CLI baseline into the provenance used by the engine."""
 
-    if baseline == "browser-use":
+    if baseline in {"browser-use", "browser-use-full"}:
         config = resolve_browser_use_config(
             task,
             provider=provider,
             model=model,
             max_steps=max_steps,
+            name=baseline,
         )
         configured_steps = config.max_steps
         provenance = _browser_use_provenance(config)
@@ -353,7 +411,7 @@ def _make_browser_tools(tools_class, config: BrowserUseConfig):
     if not isinstance(actions, dict):
         raise RuntimeError("Browser Use tools do not expose an auditable action registry")
     effective = tuple(sorted(actions))
-    expected = tuple(sorted(_BROWSER_USE_ALLOWED_ACTIONS))
+    expected = tuple(sorted(config.allowed_actions))
     if effective != expected:
         added = sorted(set(effective) - set(expected))
         missing = sorted(set(expected) - set(effective))
@@ -362,6 +420,18 @@ def _make_browser_tools(tools_class, config: BrowserUseConfig):
             f"unexpected={added!r}, missing={missing!r}"
         )
     return tools
+
+
+def _browser_use_agent_options(config: BrowserUseConfig) -> dict[str, object]:
+    """Return only condition-specific Agent options already bound into provenance."""
+
+    options: dict[str, object] = {
+        "use_judge": config.use_judge,
+        "use_vision": config.use_vision,
+    }
+    if config.max_actions_per_step is not None:
+        options["max_actions_per_step"] = config.max_actions_per_step
+    return options
 
 
 def _injection_report(proxy: inject_mod.InjectProxy | None) -> dict:
@@ -740,9 +810,7 @@ def _execute_browser_use(
                         tools=tools,
                         directly_open_url=True,
                         available_file_paths=[],
-                        use_judge=False,
-                        use_vision=False,
-                        **agent_kwargs,
+                        **_browser_use_agent_options(config),
                     )
                     history = await asyncio.wait_for(
                         agent.run(max_steps=config.max_steps),
@@ -816,12 +884,13 @@ def _execute_baseline(
     max_steps: int | None,
     agent_kwargs: dict | None = None,
 ) -> _CompletedRun:
-    if baseline == "browser-use":
+    if baseline in {"browser-use", "browser-use-full"}:
         config = resolve_browser_use_config(
             task,
             provider=provider,
             model=model,
             max_steps=max_steps,
+            name=baseline,
         )
         return _execute_browser_use(
             task=task,
@@ -1048,6 +1117,35 @@ def run_browser_use(
 ) -> dict:
     return run_external(
         baseline="browser-use",
+        task=task,
+        run_id=run_id,
+        base_url=base_url,
+        db_path=db_path,
+        model=model,
+        provider=provider,
+        max_steps=max_steps,
+        receipt_options=receipt_options,
+        receipt_builder=receipt_builder,
+        agent_kwargs=agent_kwargs,
+    )
+
+
+def run_browser_use_full(
+    *,
+    task: dict,
+    base_url: str,
+    db_path: Path | str,
+    run_id: str,
+    model: str | None = None,
+    provider: str | None = None,
+    max_steps: int | None = None,
+    receipt_options: ReceiptOptions | None = None,
+    receipt_builder: manifest_mod.ReceiptBuilder | None = None,
+    **agent_kwargs,
+) -> dict:
+    """Run the Anticipy-inspired ``browser-use-full`` learned condition."""
+    return run_external(
+        baseline="browser-use-full",
         task=task,
         run_id=run_id,
         base_url=base_url,

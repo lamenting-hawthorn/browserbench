@@ -110,7 +110,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--baseline",
         action="append",
         default=[],
-        choices=["playwright-exact", "playwright-naive", "browser-use"],
+        choices=[
+            "playwright-exact",
+            "playwright-naive",
+            "browser-use",
+            "browser-use-full",
+        ],
         help="baseline(s) to run; repeat for multiple",
     )
     parser.add_argument(
@@ -120,12 +125,16 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=PILOT_TASKS,
         help="task id(s) to run; default all pilot tasks",
     )
-    parser.add_argument("--model", default=None, help="model for browser-use baseline")
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="model for browser-use learned baselines",
+    )
     parser.add_argument(
         "--provider",
         default=None,
         choices=["deepseek", "openai", "anthropic"],
-        help="LLM provider for browser-use (deepseek|openai|anthropic)",
+        help="LLM provider for browser-use learned baselines (deepseek|openai|anthropic)",
     )
     parser.add_argument(
         "--mode",

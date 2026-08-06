@@ -71,6 +71,34 @@ _BROWSER_USE_ALLOWED_ACTIONS = (
     "select_dropdown",
     "wait",
 )
+_BROWSER_USE_FULL_EXCLUDED_ACTIONS = (
+    "evaluate",
+    "read_file",
+    "replace_file",
+    "save_as_pdf",
+    "upload_file",
+    "write_file",
+)
+_BROWSER_USE_FULL_ALLOWED_ACTIONS = (
+    "click",
+    "close",
+    "done",
+    "dropdown_options",
+    "extract",
+    "find_elements",
+    "find_text",
+    "go_back",
+    "input",
+    "navigate",
+    "screenshot",
+    "scroll",
+    "search",
+    "search_page",
+    "select_dropdown",
+    "send_keys",
+    "switch",
+    "wait",
+)
 _TRACE_UI_HEADER_RE = re.compile(
     rb'"name"\s*:\s*"X-BTB-UI-Token"\s*,\s*"value"\s*:\s*"([^"]+)"',
     re.IGNORECASE,
@@ -755,9 +783,19 @@ def _baseline_invariants(receipt: dict, issues: list[ValidationIssue]) -> None:
                 "$.trace",
                 "Playwright success requires a scrubbed native trace ZIP",
             )
-    elif name == "browser-use":
+    elif name in {"browser-use", "browser-use-full"}:
         configured_steps = execution.get("configured_steps")
         configured_wall = execution.get("configured_wall_s")
+        if name == "browser-use":
+            excluded_actions = _BROWSER_USE_EXCLUDED_ACTIONS
+            allowed_actions = _BROWSER_USE_ALLOWED_ACTIONS
+            use_vision = False
+            max_actions_per_step = None
+        else:
+            excluded_actions = _BROWSER_USE_FULL_EXCLUDED_ACTIONS
+            allowed_actions = _BROWSER_USE_FULL_ALLOWED_ACTIONS
+            use_vision = True
+            max_actions_per_step = 8
         expected_parameters = {
             "max_steps": configured_steps,
             "wall_s": configured_wall,
@@ -772,9 +810,9 @@ def _baseline_invariants(receipt: dict, issues: list[ValidationIssue]) -> None:
                 "deterministic_rendering": True,
             },
             "use_judge": False,
-            "use_vision": False,
+            "use_vision": use_vision,
             "directly_open_url": True,
-            "excluded_actions": list(_BROWSER_USE_EXCLUDED_ACTIONS),
+            "excluded_actions": list(excluded_actions),
             "llm_generation": {
                 "temperature": 0.0,
                 "max_output_tokens": 4096,
@@ -783,6 +821,8 @@ def _baseline_invariants(receipt: dict, issues: list[ValidationIssue]) -> None:
                 "seed": None,
             },
         }
+        if max_actions_per_step is not None:
+            expected_parameters["max_actions_per_step"] = max_actions_per_step
         if framework.get("name") != "browser-use":
             _issue(issues, "$.baseline.framework.name", "must equal 'browser-use'")
         if baseline.get("provider") not in {"deepseek", "openai", "anthropic"}:
@@ -806,7 +846,7 @@ def _baseline_invariants(receipt: dict, issues: list[ValidationIssue]) -> None:
                 "$.execution.configured_steps",
                 "Browser Use requires a positive enforced step budget",
             )
-        expected_modality = {"dom": True, "vision": False}
+        expected_modality = {"dom": True, "vision": use_vision}
         expected_capability = {
             "visible_page_controls_only": True,
             "javascript_console": False,
@@ -814,8 +854,8 @@ def _baseline_invariants(receipt: dict, issues: list[ValidationIssue]) -> None:
             "filesystem": False,
             "database": False,
             "enforcement": {
-                "agent_tools_allowed": list(_BROWSER_USE_ALLOWED_ACTIONS),
-                "agent_tools_excluded": list(_BROWSER_USE_EXCLUDED_ACTIONS),
+                "agent_tools_allowed": list(allowed_actions),
+                "agent_tools_excluded": list(excluded_actions),
                 "fixture_write_api_requires_ui_token": True,
                 "navigation": "run_fixture_origin_only",
                 "telemetry": False,
@@ -839,7 +879,7 @@ def _baseline_invariants(receipt: dict, issues: list[ValidationIssue]) -> None:
         _issue(
             issues,
             "$.baseline.modality_policy",
-            "must equal the frozen DOM-only modality policy",
+            "must equal the frozen modality policy",
         )
     if baseline.get("capability_policy") != expected_capability:
         _issue(

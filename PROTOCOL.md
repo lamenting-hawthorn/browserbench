@@ -88,13 +88,30 @@ The agent may act through visible page controls. Fixture API endpoints require a
 per-run token injected into the served page and attached by the page's own
 JavaScript. Requests without that token fail with HTTP 403. Browser Use may
 navigate only inside the exact per-run fixture origin; its browser security
-watchdog enforces that origin allowlist. Filesystem, extraction-to-file,
-upload/download/PDF, arbitrary evaluation, raw key, screenshot, external
-search, tab-switching, and close actions are excluded. The harness also compares
-the effective Browser Use action registry with an exact allowlist and fails on
-framework action drift. Downloads, default extensions, CAPTCHA services, and
-cross-origin iframes are disabled; vision and judge-model scoring are also
-disabled. The receipt records the enforced allowlist and excluded action names.
+watchdog enforces that origin allowlist. The harness compares the effective
+Browser Use action registry with an exact per-condition allowlist and fails on
+framework action drift. Downloads, default extensions, CAPTCHA services,
+cross-origin iframes, and framework telemetry are disabled. The receipt records
+the enforced allowlist, excluded action names, modality, and the
+`max_actions_per_step` bound.
+
+Two learned conditions share the same isolation, origin, telemetry, and
+no-direct-API/database/filesystem boundary:
+
+- `browser-use` (restricted DOM-only): filesystem, extraction-to-file,
+  upload/download/PDF, arbitrary evaluation, screenshot, external search,
+  tab-switching, and close actions are excluded. Vision and judge-model scoring
+  are disabled (`use_vision=false`, `use_judge=false`). The harness does not
+  override `max_actions_per_step` for this legacy condition, so its effective
+  default remains tied to the exact recorded Browser Use version.
+- `browser-use-full` (Anticipy-inspired composite): only filesystem, file
+  replacement, upload, PDF export, arbitrary evaluation, and write-to-file
+  actions are excluded. Vision is enabled (`use_vision=true`), judge-model
+  scoring stays disabled (`use_judge=false`), and the per-step action bound is
+  `max_actions_per_step=8`. `browser-use-full` is a practical composite that
+  changes several capability factors at once; it is not a matched single-factor
+  ablation of `browser-use` and any later comparison must decompose it through
+  the Phase 4.3 affordance ablations.
 
 The harness and independent validator may read the database after the run. The
 baseline may not access the database or hidden oracle directly.
@@ -153,7 +170,9 @@ Deterministic controls:
 - `playwright-naive`: retry once with a newly generated operation ID after the
   dropped response.
 
-Learned baseline:
+Learned baselines:
+
+`browser-use` (the frozen exploratory condition):
 
 - framework: Browser Use `>=0.13.6,<0.14`;
 - provider: explicitly one of DeepSeek, OpenAI, or Anthropic;
@@ -164,12 +183,47 @@ Learned baseline:
 - provider SDK retries: `0`;
 - `top_p` and seed: omitted (`null` in normalized provenance);
 - task step budget and wall-clock budget: recorded and enforced;
-- headless DOM mode; vision and judge disabled.
+- headless DOM mode; vision and judge disabled;
+- enforced capability allowlist: `click`, `done`, `dropdown_options`,
+  `find_elements`, `find_text`, `go_back`, `input`, `navigate`, `scroll`,
+  `search_page`, `select_dropdown`, `wait`;
+- exact excluded actions: `close`, `evaluate`, `extract`, `read_file`,
+  `replace_file`, `save_as_pdf`, `screenshot`, `search`, `send_keys`,
+  `switch`, `upload_file`, `write_file`.
+
+`browser-use-full` (an Anticipy-inspired composite practical condition):
+
+- the same framework, provider, model, generation, and budget contracts as
+  `browser-use`, plus:
+- `use_vision: true` and `use_judge: false` recorded in provenance and passed
+  to the Agent exactly as resolved;
+- `max_actions_per_step: 8` recorded in provenance and passed to the Agent;
+- enforced capability allowlist expands to `click`, `close`, `done`,
+  `dropdown_options`, `extract`, `find_elements`, `find_text`, `go_back`,
+  `input`, `navigate`, `screenshot`, `scroll`, `search`, `search_page`,
+  `select_dropdown`, `send_keys`, `switch`, `wait`;
+- exact excluded actions narrow to `evaluate`, `read_file`, `replace_file`,
+  `save_as_pdf`, `upload_file`, `write_file`;
+- fresh managed browser, origin-only navigation, per-run UI-token isolation,
+  framework telemetry off, and no direct API/database/filesystem access are
+  preserved identically.
+
+The condition is a **composite**: it changes vision, action-set breadth, and
+max-actions-per-step at once. It is not a matched single-factor ablation and
+cannot by itself isolate which factor drives any difference from `browser-use`.
+It is labeled Anticipy-inspired because it mirrors the practical
+vision-and-rich-action profile used by agentic browser suites; no Anticipy code,
+data, or branding is imported. A later ablation (Phase 4.3) must decompose the
+three factors before any comparative claim is made from `browser-use-full`
+evidence.
 
 The exact installed framework version, provider, model, normalized generation
-configuration, budget, prompt, modality, and capability policy are bound into
-each receipt. Service-side nondeterminism remains possible despite temperature
-zero and must be estimated through repetitions.
+configuration, budget, prompt, modality, capability policy, and (for
+`browser-use-full`) `use_vision`, `use_judge`, and `max_actions_per_step` are
+bound into each receipt. The independent validator reconstructs the exact
+condition-specific policy and rejects any drift. Service-side nondeterminism
+remains possible despite temperature zero and must be estimated through
+repetitions.
 
 ## 10. Final-answer claim contract
 

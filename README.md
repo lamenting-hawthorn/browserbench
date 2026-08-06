@@ -195,14 +195,32 @@ btb-run --list
 btb-run --task msg_send_01 --baseline playwright-exact
 btb-run --task msg_send_01 --baseline playwright-naive
 
-# Learned baseline. Provider/model are explicit in the receipt.
+# Learned baselines. Provider/model are explicit in the receipt.
 export DEEPSEEK_API_KEY=...
 btb-run \
   --task msg_send_01 \
   --baseline browser-use \
   --provider deepseek \
   --model deepseek-chat
+
+# Anticipy-inspired composite practical condition: vision on,
+# judge off, max_actions_per_step=8, and the 18-action visible-page
+# tool set (filesystem/file/PDF/evaluate/write actions still excluded).
+btb-run \
+  --task msg_send_01 \
+  --baseline browser-use-full \
+  --provider deepseek \
+  --model deepseek-chat
 ```
+
+`browser-use-full` is a **composite** condition: it changes vision, action-set
+breadth, and `max_actions_per_step` at once. It is Anticipy-inspired (no
+Anticipy code, data, screenshots, or branding are used) and must be decomposed
+by later ablations before any single-capability claim is drawn from it. Both
+learned conditions keep fresh managed browsers, per-run UI-token isolation,
+origin-only navigation, telemetry off, and no direct API/database/filesystem
+access. The independent validator reconstructs each condition's exact policy
+and rejects drift.
 
 Never put API keys on the command line. Receipt-owned free text and JSON traces
 are sanitized, but provider credentials must still remain in environment

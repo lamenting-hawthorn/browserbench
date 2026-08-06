@@ -390,6 +390,18 @@ Only after deterministic calibration passes:
 - retain all failed and timed-out runs in denominators;
 - label results as exploratory unless the full canonical protocol is satisfied.
 
+Run both frozen learned conditions against the same matrix:
+
+- `browser-use`, the restricted DOM-only condition with its preserved
+  framework-default action batching;
+- `browser-use-full`, the composite vision-enabled, expanded-safe-registry,
+  eight-actions-per-step condition.
+
+The full condition remains clean-room: do not import Anticipy code, prompts,
+traces, task data, or implementation details. Because it changes several
+runtime factors together, report it as a composite condition; a difference
+between the two conditions does not identify which factor caused the change.
+
 Do not compare old DeepSeek runs to new runs as if matched. Do not infer the old acting-agent model identity.
 
 ## Final integration review
@@ -454,10 +466,17 @@ Build a factorial, matched set of product affordances:
 - visible transaction history on versus off;
 - explicit reconciliation endpoint/tool on versus off;
 - ambiguity cue versus neutral instruction;
-- DOM-only, vision-enabled, and explicitly API-assisted capability policies.
+- DOM-only versus vision-enabled operation;
+- restricted versus expanded safe action registries;
+- one versus eight actions per step;
+- explicitly API-assisted capability policies.
 
 Change only the declared factor inside a matched comparison. Receipt hashes and
 validator rules must make unintended fixture/prompt differences detectable.
+Use these single-factor cells to separate the effects that the Phase 3
+`browser-use-full` composite deliberately combines. File I/O, arbitrary code
+evaluation, and direct database or benchmark-API access remain prohibited in
+all browser-only cells.
 
 ### Phase 4.4 — Matched learned-agent conditions
 

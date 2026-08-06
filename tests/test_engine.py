@@ -409,6 +409,121 @@ def test_browser_use_tools_fail_closed_on_action_registry_drift(
         engine._make_browser_tools(DriftedTools, _browser_config())
 
 
+def _browser_full_config() -> engine.BrowserUseConfig:
+    return engine.resolve_browser_use_config(
+        task_runner.load_definition("msg_send_01"),
+        provider="deepseek",
+        model="deepseek-chat",
+        max_steps=5,
+        name="browser-use-full",
+    )
+
+
+class _FakeFullTools(_FakeTools):
+    action_names = set(engine._BROWSER_USE_FULL_ALLOWED_ACTIONS)
+
+
+def test_browser_use_full_configuration_and_provenance_are_exact() -> None:
+    config = _browser_full_config()
+    assert config.name == "browser-use-full"
+    assert config.allowed_actions == engine._BROWSER_USE_FULL_ALLOWED_ACTIONS
+    assert config.excluded_actions == engine._BROWSER_USE_FULL_EXCLUDED_ACTIONS
+    assert engine._browser_use_agent_options(config) == {
+        "use_judge": False,
+        "use_vision": True,
+        "max_actions_per_step": 8,
+    }
+
+    provenance = engine._browser_use_provenance(config).to_dict()
+    assert provenance["name"] == "browser-use-full"
+    assert provenance["parameters"]["use_vision"] is True
+    assert provenance["parameters"]["use_judge"] is False
+    assert provenance["parameters"]["max_actions_per_step"] == 8
+    assert provenance["modality_policy"] == {"dom": True, "vision": True}
+    enforcement = provenance["capability_policy"]["enforcement"]
+    assert enforcement["agent_tools_allowed"] == list(config.allowed_actions)
+    assert enforcement["agent_tools_excluded"] == list(config.excluded_actions)
+
+
+def test_browser_use_restricted_policy_and_runtime_options_remain_frozen() -> None:
+    config = _browser_config()
+    provenance = engine._browser_use_provenance(config).to_dict()
+    assert config.name == "browser-use"
+    assert engine._browser_use_agent_options(config) == {
+        "use_judge": False,
+        "use_vision": False,
+    }
+    assert "max_actions_per_step" not in provenance["parameters"]
+    assert provenance["modality_policy"] == {"dom": True, "vision": False}
+    enforcement = provenance["capability_policy"]["enforcement"]
+    assert enforcement["agent_tools_allowed"] == list(
+        engine._BROWSER_USE_ALLOWED_ACTIONS
+    )
+    assert enforcement["agent_tools_excluded"] == list(
+        engine._BROWSER_USE_EXCLUDED_ACTIONS
+    )
+
+
+def test_browser_use_full_tools_match_the_exact_frozen_allowlist() -> None:
+    tools = engine._make_browser_tools(_FakeFullTools, _browser_full_config())
+    assert tools.exclude_actions == list(engine._BROWSER_USE_FULL_EXCLUDED_ACTIONS)
+
+
+@pytest.mark.parametrize(
+    ("action_names", "message"),
+    [
+        (
+            set(engine._BROWSER_USE_FULL_ALLOWED_ACTIONS) | {"new_framework_action"},
+            "unexpected=['new_framework_action']",
+        ),
+        (
+            set(engine._BROWSER_USE_FULL_ALLOWED_ACTIONS) - {"screenshot"},
+            "missing=['screenshot']",
+        ),
+    ],
+)
+def test_browser_use_full_tools_fail_closed_on_action_registry_drift(
+    action_names: set[str],
+    message: str,
+) -> None:
+    class DriftedFullTools(_FakeFullTools):
+        pass
+
+    DriftedFullTools.action_names = action_names
+    with pytest.raises(RuntimeError, match=re.escape(message)):
+        engine._make_browser_tools(DriftedFullTools, _browser_full_config())
+
+
+def test_browser_use_full_routes_through_the_learned_executor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    expected = object()
+
+    def fake_execute_browser_use(**kwargs):
+        captured.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(engine, "_execute_browser_use", fake_execute_browser_use)
+    result = engine._execute_baseline(
+        baseline="browser-use-full",
+        task=task_runner.load_definition("msg_send_01"),
+        base_url="http://fixture.invalid",
+        database_path=Path("unused.sqlite3"),
+        builder=object(),
+        provider="openai",
+        model="gpt-4.1-mini",
+        max_steps=4,
+    )
+    assert result is expected
+    config = captured["config"]
+    assert isinstance(config, engine.BrowserUseConfig)
+    assert config.name == "browser-use-full"
+    assert config.provider == "openai"
+    assert config.model == "gpt-4.1-mini"
+    assert engine._browser_use_agent_options(config)["max_actions_per_step"] == 8
+
+
 @pytest.mark.parametrize("url", ["file:///tmp/fixture", "not-a-url", ""])
 def test_fixture_origin_rejects_non_http_urls(url: str) -> None:
     with pytest.raises(ValueError, match="HTTP\\(S\\) origin"):

@@ -40,6 +40,24 @@ def _browser_baseline(task: dict) -> manifest.BaselineProvenance:
     return replace(baseline, framework_version="0.13.6")
 
 
+def _browser_full_baseline(task: dict) -> manifest.BaselineProvenance:
+    baseline = engine._browser_use_provenance(
+        engine.BrowserUseConfig(
+            provider="deepseek",
+            model="deepseek-chat",
+            max_steps=task["budget"]["steps"],
+            wall_s=float(task["budget"]["wall_s"]),
+            name="browser-use-full",
+            excluded_actions=engine._BROWSER_USE_FULL_EXCLUDED_ACTIONS,
+            allowed_actions=engine._BROWSER_USE_FULL_ALLOWED_ACTIONS,
+            use_vision=True,
+            use_judge=False,
+            max_actions_per_step=8,
+        )
+    )
+    return replace(baseline, framework_version="0.13.6")
+
+
 def _manifest_claim(claim: claim_mod.Claim) -> dict:
     result = claim.to_dict()
     result.pop("raw")
@@ -109,6 +127,7 @@ def _write_valid_receipt(
     task_id: str,
     *,
     browser_use: bool = False,
+    browser_use_full: bool = False,
 ) -> Path:
     task = task_runner.load_definition(task_id)
     database_path = tmp_path / f"{task_id}.sqlite3"
@@ -151,8 +170,14 @@ def _write_valid_receipt(
     builder = manifest.ReceiptBuilder(
         run_id=f"valid-{task_id}",
         freeze=task["freeze"],
-        baseline=_browser_baseline(task) if browser_use else _baseline(task),
-        configured_steps=task["budget"]["steps"] if browser_use else None,
+        baseline=(
+            _browser_full_baseline(task)
+            if browser_use_full
+            else _browser_baseline(task)
+            if browser_use
+            else _baseline(task)
+        ),
+        configured_steps=task["budget"]["steps"] if (browser_use or browser_use_full) else None,
         configured_wall_s=task["budget"]["wall_s"],
         canonical_requested=False,
         task_definition=task,
@@ -170,7 +195,7 @@ def _write_valid_receipt(
     builder.injection_report = report
     builder.evaluation = evaluation.to_dict()
     builder.outcome = evaluation.headline_outcome
-    if browser_use:
+    if browser_use or browser_use_full:
         builder.write_json_trace({"steps": []}, kind="browser-use-history")
     else:
         artifact_directory = tmp_path / "artifacts"
@@ -524,4 +549,83 @@ def test_browser_use_baseline_contract_validates_and_rejects_policy_drift(
     issues = validate_manifest.validate_file(mutated, source_repo=None)
     paths = {issue.path for issue in issues}
     assert "$.baseline.parameters" in paths
+    assert "$.baseline.capability_policy" in paths
+
+
+def test_browser_use_full_baseline_contract_validates(
+    tmp_path: Path,
+) -> None:
+    path = _write_valid_receipt(
+        tmp_path,
+        "msg_send_01",
+        browser_use_full=True,
+    )
+    issues = validate_manifest.validate_file(path, source_repo=None)
+    assert issues == []
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_path"),
+    [
+        ("use_vision", "$.baseline.parameters"),
+        ("max_actions_per_step", "$.baseline.parameters"),
+        ("excluded_actions", "$.baseline.parameters"),
+        ("agent_tools_allowed", "$.baseline.capability_policy"),
+    ],
+)
+def test_browser_use_full_baseline_rejects_policy_drift(
+    tmp_path: Path,
+    mutation: str,
+    expected_path: str,
+) -> None:
+    path = _write_valid_receipt(
+        tmp_path,
+        "msg_send_01",
+        browser_use_full=True,
+    )
+
+    def tamper(receipt: dict) -> None:
+        if mutation == "use_vision":
+            receipt["baseline"]["parameters"]["use_vision"] = False
+        elif mutation == "max_actions_per_step":
+            receipt["baseline"]["parameters"]["max_actions_per_step"] = 3
+        elif mutation == "excluded_actions":
+            receipt["baseline"]["parameters"]["excluded_actions"] = [
+                "evaluate",
+                "write_file",
+            ]
+        else:
+            receipt["baseline"]["capability_policy"]["enforcement"][
+                "agent_tools_allowed"
+            ] = ["click", "done"]
+
+    mutated = _mutated(path, f"browser-full-drift-{mutation}", tamper)
+    issues = validate_manifest.validate_file(mutated, source_repo=None)
+    assert expected_path in {issue.path for issue in issues}
+
+
+def test_browser_use_full_rejects_restricted_policy_as_drift(
+    tmp_path: Path,
+) -> None:
+    path = _write_valid_receipt(
+        tmp_path,
+        "msg_send_01",
+        browser_use_full=True,
+    )
+
+    def tamper(receipt: dict) -> None:
+        receipt["baseline"]["parameters"]["use_vision"] = False
+        receipt["baseline"]["parameters"]["excluded_actions"] = list(
+            engine._BROWSER_USE_EXCLUDED_ACTIONS
+        )
+        receipt["baseline"]["modality_policy"] = {"dom": True, "vision": False}
+        receipt["baseline"]["capability_policy"]["enforcement"][
+            "agent_tools_allowed"
+        ] = list(engine._BROWSER_USE_ALLOWED_ACTIONS)
+
+    mutated = _mutated(path, "browser-full-restricted-drift", tamper)
+    issues = validate_manifest.validate_file(mutated, source_repo=None)
+    paths = {issue.path for issue in issues}
+    assert "$.baseline.parameters" in paths
+    assert "$.baseline.modality_policy" in paths
     assert "$.baseline.capability_policy" in paths
