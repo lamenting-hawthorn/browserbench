@@ -39,7 +39,7 @@ Issues = "https://github.com/lamenting-hawthorn/browserbench/issues"
 Documentation = "https://github.com/lamenting-hawthorn/browserbench#readme"
 
 [project.optional-dependencies]
-baselines = ["browser-use>=0.13.6,<0.14"]
+baselines = ["browser-use==0.13.6"]
 dev = [
   "build>=1.2,<2",
   "pytest>=8.3,<10",

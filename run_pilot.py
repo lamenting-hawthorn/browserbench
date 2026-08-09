@@ -194,6 +194,20 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--max-steps must be positive")
 
     baselines = args.baseline or ["playwright-exact"]
+    if "browser-use-full" in baselines and (
+        args.provider is None or args.model is None
+    ):
+        parser.error(
+            "browser-use-full requires explicit --provider and --model arguments"
+        )
+    if "browser-use-full" in baselines and (
+        args.provider,
+        args.model,
+    ) not in engine._BROWSER_USE_FULL_PROVIDER_MODELS:
+        parser.error(
+            "browser-use-full provider/model must be one of: "
+            "anthropic/claude-sonnet-4-0, openai/gpt-4.1-mini"
+        )
     tasks = args.task or PILOT_TASKS
     results: list[dict] = []
     receipt_options = engine.ReceiptOptions(

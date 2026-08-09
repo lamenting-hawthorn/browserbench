@@ -167,15 +167,13 @@ Python 3.11 or newer is required.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install --constraint constraints/runtime-0.1.0.txt -e ".[dev]"
+python -m pip install --constraint constraints/runtime-0.1.0.txt -e ".[baselines,dev]"
 python -m playwright install chromium
 ```
 
-For the learned Browser Use baseline:
-
-```bash
-python -m pip install --constraint constraints/runtime-0.1.0.txt -e ".[baselines]"
-```
+The documented test environment includes Browser Use 0.13.6: its local
+constructor/sandbox gate is decisive and is not skipped when the dependency is
+missing.
 
 `constraints/runtime-0.1.0.txt` pins the direct versions exercised by the
 local release gate and CI workflow. It is a constraint set, not a complete
@@ -203,24 +201,58 @@ btb-run \
   --provider deepseek \
   --model deepseek-chat
 
-# Anticipy-inspired composite practical condition: vision on,
+# Clean-room expanded composite condition: vision on,
 # judge off, max_actions_per_step=8, and the 18-action visible-page
-# tool set (filesystem/file/PDF/evaluate/write actions still excluded).
+# tool set (arbitrary file/PDF/evaluate/write actions still excluded).
+export OPENAI_API_KEY=...
 btb-run \
   --task msg_send_01 \
   --baseline browser-use-full \
-  --provider deepseek \
-  --model deepseek-chat
+  --provider openai \
+  --model gpt-4.1-mini
 ```
 
 `browser-use-full` is a **composite** condition: it changes vision, action-set
-breadth, and `max_actions_per_step` at once. It is Anticipy-inspired (no
-Anticipy code, data, screenshots, or branding are used) and must be decomposed
-by later ablations before any single-capability claim is drawn from it. Both
+breadth, and `max_actions_per_step` at once. It is implemented as a clean-room
+benchmark condition and must be decomposed by later ablations before any
+single-capability claim is drawn from it. Both
 learned conditions keep fresh managed browsers, per-run UI-token isolation,
-origin-only navigation, telemetry off, and no direct API/database/filesystem
-access. The independent validator reconstructs each condition's exact policy
-and rejects drift.
+origin-only navigation, telemetry off, and no direct API/database or arbitrary
+agent-controlled filesystem access. Framework-created files are restricted to
+one parent-owned system-temporary sandbox per run, inventory-hashed after the
+child exits, then removed and verified before a successful learned receipt.
+The independent validator reconstructs each condition's exact policy and
+rejects drift or inventory tampering.
+
+Here, origin-only navigation is a narrow, explicit contract: the
+benchmark-owned `navigate` callback validates the exact fixture HTTP(S) origin
+before dispatch. Browser Use's allowed-domain/SecurityWatchdog layer is only
+defense in depth for HTTP(S) navigation after dispatch, and the harness then
+observes/recover-stops an unverified final URL. The controlled fixture exposes
+no link or navigation-producing click controls; that does not establish a
+general click-containment guarantee. In `browser-use-full`, the retained
+`search` name preserves Browser Use 0.13.6's `SearchAction` schema but is a
+benchmark-owned no-dispatch rejection, so external web search is unavailable.
+
+`browser-use-full` requires an explicit statically allowlisted pair:
+`openai/gpt-4.1-mini` or `anthropic/claude-sonnet-4-0`. This allowlist is a
+local framework-policy constraint, not evidence that either remote service was
+called or its vision behavior was verified. Other pairs fail closed before
+browser launch or provider invocation. Browser Use 0.13.6 removes `screenshot`
+when passed an explicit vision boolean, so the harness uses its public `auto`
+compatibility setting, binds the effective value to `true`, and replaces the
+upstream file-capable screenshot action with a benchmark-owned action that has
+no filename/path parameter and only requests an image in the next observation.
+Immediately before `Agent.run()`, the harness audits effective settings, LLM
+roles, the action registry, generated action schemas, and screenshot callback
+identity/parameter behavior plus each fixture-owned bound callback, including
+the no-dispatch search rejection; the observed semantic policy is bound into
+the receipt and independently validated without callable-source hashing.
+
+This is application/framework path confinement, not mandatory OS containment
+against arbitrary Python or native code. The implemented proof is static/unit,
+local child-process lifecycle, and exact installed-framework constructor audit;
+it does not include a live provider or browser benchmark run.
 
 Never put API keys on the command line. Receipt-owned free text and JSON traces
 are sanitized, but provider credentials must still remain in environment

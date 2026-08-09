@@ -97,9 +97,9 @@ def test_browser_use_full_is_an_accepted_cli_baseline_choice(
             "--baseline",
             "browser-use-full",
             "--provider",
-            "deepseek",
+            "openai",
             "--model",
-            "deepseek-chat",
+            "gpt-4.1-mini",
             "--receipt-dir",
             str(tmp_path),
         ]
@@ -136,6 +136,10 @@ def test_browser_use_full_routes_through_external_executor(
             "msg_read_01",
             "--baseline",
             "browser-use-full",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-4.1-mini",
             "--external-server",
             "--receipt-dir",
             str(tmp_path),
@@ -143,3 +147,28 @@ def test_browser_use_full_routes_through_external_executor(
     )
     assert status == 0
     assert captured["baseline"] == "browser-use-full"
+
+
+def test_browser_use_full_rejects_implicit_provider_model_defaults() -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        run_pilot.main(
+            ["--task", "msg_read_01", "--baseline", "browser-use-full"]
+        )
+    assert exc_info.value.code == 2
+
+
+def test_browser_use_full_cli_rejects_non_allowlisted_pair() -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        run_pilot.main(
+            [
+                "--task",
+                "msg_read_01",
+                "--baseline",
+                "browser-use-full",
+                "--provider",
+                "deepseek",
+                "--model",
+                "deepseek-chat",
+            ]
+        )
+    assert exc_info.value.code == 2

@@ -25,7 +25,7 @@ jobs:
         run: >-
           python -m pip install
           --constraint constraints/runtime-0.1.0.txt
-          -e ".[dev]"
+          -e ".[baselines,dev]"
       - name: Lint
         run: python -m ruff check .
       - name: Test without cache
@@ -57,7 +57,7 @@ jobs:
           ANONYMIZED_TELEMETRY: "false"
         run: |
           "$RUNNER_TEMP/btb-wheel/bin/pip" install --constraint constraints/runtime-0.1.0.txt "dist/browsertransactionbench-0.1.0-py3-none-any.whl[baselines]"
-          "$RUNNER_TEMP/btb-wheel/bin/python" -c "from btb.harness import engine; from browser_use import Agent, Browser, Tools; c=engine.BrowserUseConfig(provider='deepseek', model='deepseek-chat', max_steps=5, wall_s=10); llm=engine._make_llm(c, api_key='test-only'); origin=engine._fixture_origin_pattern('http://127.0.0.1:4321'); browser=Browser(headless=True, accept_downloads=False, allowed_domains=[origin], captcha_solver=False, cross_origin_iframes=False, deterministic_rendering=True, enable_default_extensions=False, permissions=[]); tools=engine._make_browser_tools(Tools, c); agent=Agent(task='Open http://127.0.0.1:4321/ and return exactly {\"believes\":\"unknown\"}', browser=browser, llm=llm, tools=tools, directly_open_url=True, available_file_paths=[], use_judge=False, use_vision=False); assert agent is not None; assert browser.browser_profile.allowed_domains == [origin]"
+          "$RUNNER_TEMP/btb-wheel/bin/python" -c "from btb.harness import engine; expected={'browser-use:deepseek/deepseek-chat', 'browser-use-full:anthropic/claude-sonnet-4-0', 'browser-use-full:openai/gpt-4.1-mini'}; assert set(engine.audit_browser_use_installation()) == expected"
 
   managed-browser-smoke:
     runs-on: ubuntu-latest

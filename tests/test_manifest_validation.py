@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import builtins
 import copy
 import hashlib
+import importlib
 import json
+import os
 import zipfile
 from dataclasses import replace
 from pathlib import Path
@@ -12,12 +15,18 @@ from pathlib import Path
 import pytest
 
 from btb.app import db
+from btb.harness import browser_use_policy
 from btb.harness import engine
 from btb.harness import manifest
 from btb.harness import validate_manifest
 from btb.oracle import claim as claim_mod
 from btb.oracle import score as score_mod
 from btb.tasks import runner as task_runner
+
+
+_BROWSER_USE_SCHEMA_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "browser_use_0136_semantic_policy.json"
+)
 
 
 def _baseline(task: dict) -> manifest.BaselineProvenance:
@@ -28,32 +37,146 @@ def _baseline(task: dict) -> manifest.BaselineProvenance:
     return replace(baseline, framework_version="1")
 
 
+def _fixture_schema_condition(
+    config: engine.BrowserUseConfig,
+) -> dict[str, object]:
+    payload = json.loads(_BROWSER_USE_SCHEMA_FIXTURE.read_text(encoding="utf-8"))
+    condition = browser_use_policy.schema_condition(
+        config.name,
+        config.provider,
+        config.model,
+    )
+    conditions = payload.get("conditions")
+    if not isinstance(conditions, dict):
+        raise AssertionError("Browser Use schema fixture has no conditions")
+    fixture = conditions.get(condition)
+    if not isinstance(fixture, dict):
+        raise AssertionError(f"Browser Use schema fixture lacks {condition}")
+    if {
+        "name": fixture.get("name"),
+        "provider": fixture.get("provider"),
+        "model": fixture.get("model"),
+    } != {
+        "name": config.name,
+        "provider": config.provider,
+        "model": config.model,
+    }:
+        raise AssertionError(f"Browser Use schema fixture metadata drifted for {condition}")
+    return copy.deepcopy(fixture)
+
+
+def _observed_browser_policy(config: engine.BrowserUseConfig) -> dict[str, object]:
+    fixture = _fixture_schema_condition(config)
+    fixture_actions = fixture.get("actions")
+    action_model_schema = fixture.get("action_model_schema")
+    if not isinstance(fixture_actions, list) or not isinstance(action_model_schema, dict):
+        raise AssertionError("Browser Use schema fixture condition is malformed")
+    names = tuple(config.allowed_actions)
+    actions: list[dict[str, object]] = []
+    for fixture_action in fixture_actions:
+        if not isinstance(fixture_action, dict):
+            raise AssertionError("Browser Use schema fixture action is malformed")
+        name = fixture_action.get("name")
+        parameter_schema = fixture_action.get("parameter_schema")
+        if not isinstance(name, str) or not isinstance(parameter_schema, dict):
+            raise AssertionError("Browser Use schema fixture action lacks schema data")
+        action: dict[str, object] = {
+            "name": name,
+            "parameter_schema": parameter_schema,
+            "parameter_schema_sha256": manifest.canonical_json_sha256(parameter_schema),
+        }
+        callback = browser_use_policy.FIXTURE_ACTION_CALLBACKS.get(name)
+        if callback is not None:
+            action["callback_identity"] = callback["identity"]
+            action["callback_behavior"] = callback["behavior"]
+        actions.append(action)
+    if tuple(action["name"] for action in actions) != names:
+        raise AssertionError("Browser Use schema fixture action names drifted")
+    if config.name == "browser-use-full":
+        screenshot = next(action for action in actions if action["name"] == "screenshot")
+        screenshot["callback_identity"] = "btb.no_file_screenshot.v1"
+        screenshot["callback_behavior"] = "request_next_observation_without_file_write"
+    return {
+        "status": "observed",
+        "browser_use_version": "0.13.6",
+        "settings": {
+            "available_file_paths": [],
+            "directly_open_url": True,
+            "display_files_in_done_text": False,
+            "generate_gif": False,
+            "max_actions_per_step": (
+                config.max_actions_per_step
+                if config.max_actions_per_step is not None
+                else 5
+            ),
+            "message_compaction": False,
+            "save_conversation_path": None,
+            "use_judge": False,
+            "use_vision": config.use_vision,
+        },
+        "framework_paths": {
+            "agent_directory": "sandbox_root_only",
+            "file_system_base": "sandbox_root_only",
+            "file_system_data": "sandbox_root_only",
+            "screenshot_storage": "sandbox_root_only",
+        },
+        "llm_roles": {
+            "primary": {"provider": config.provider, "model": config.model},
+            "page_extraction": {
+                "provider": config.provider,
+                "model": config.model,
+            },
+            "judge": {
+                "active": False,
+                "provider": config.provider,
+                "model": config.model,
+            },
+            "fallback": None,
+        },
+        "action_model_names": list(names),
+        "action_model_schema": action_model_schema,
+        "action_model_schema_sha256": manifest.canonical_json_sha256(
+            action_model_schema
+        ),
+        "schema_condition": browser_use_policy.schema_condition(
+            config.name,
+            config.provider,
+            config.model,
+        ),
+        "actions": actions,
+    }
+
+
 def _browser_baseline(task: dict) -> manifest.BaselineProvenance:
+    config = engine.resolve_browser_use_config(
+        task,
+        provider="deepseek",
+        model="deepseek-chat",
+        max_steps=task["budget"]["steps"],
+    )
     baseline = engine._browser_use_provenance(
-        engine.BrowserUseConfig(
-            provider="deepseek",
-            model="deepseek-chat",
-            max_steps=task["budget"]["steps"],
-            wall_s=float(task["budget"]["wall_s"]),
-        )
+        config,
+        effective_policy=_observed_browser_policy(config),
     )
     return replace(baseline, framework_version="0.13.6")
 
 
-def _browser_full_baseline(task: dict) -> manifest.BaselineProvenance:
+def _browser_full_baseline(
+    task: dict,
+    *,
+    provider: str = "openai",
+    model: str = "gpt-4.1-mini",
+) -> manifest.BaselineProvenance:
+    config = engine.resolve_browser_use_config(
+        task,
+        provider=provider,
+        model=model,
+        max_steps=task["budget"]["steps"],
+        name="browser-use-full",
+    )
     baseline = engine._browser_use_provenance(
-        engine.BrowserUseConfig(
-            provider="deepseek",
-            model="deepseek-chat",
-            max_steps=task["budget"]["steps"],
-            wall_s=float(task["budget"]["wall_s"]),
-            name="browser-use-full",
-            excluded_actions=engine._BROWSER_USE_FULL_EXCLUDED_ACTIONS,
-            allowed_actions=engine._BROWSER_USE_FULL_ALLOWED_ACTIONS,
-            use_vision=True,
-            use_judge=False,
-            max_actions_per_step=8,
-        )
+        config,
+        effective_policy=_observed_browser_policy(config),
     )
     return replace(baseline, framework_version="0.13.6")
 
@@ -128,6 +251,8 @@ def _write_valid_receipt(
     *,
     browser_use: bool = False,
     browser_use_full: bool = False,
+    browser_use_full_provider: str = "openai",
+    browser_use_full_model: str = "gpt-4.1-mini",
 ) -> Path:
     task = task_runner.load_definition(task_id)
     database_path = tmp_path / f"{task_id}.sqlite3"
@@ -171,7 +296,11 @@ def _write_valid_receipt(
         run_id=f"valid-{task_id}",
         freeze=task["freeze"],
         baseline=(
-            _browser_full_baseline(task)
+            _browser_full_baseline(
+                task,
+                provider=browser_use_full_provider,
+                model=browser_use_full_model,
+            )
             if browser_use_full
             else _browser_baseline(task)
             if browser_use
@@ -197,6 +326,17 @@ def _write_valid_receipt(
     builder.outcome = evaluation.headline_outcome
     if browser_use or browser_use_full:
         builder.write_json_trace({"steps": []}, kind="browser-use-history")
+        builder.bind_framework_filesystem(
+            state="cleaned",
+            inventory={
+                "version": 1,
+                "entries": [],
+                "entry_count": 0,
+                "file_count": 0,
+                "total_bytes": 0,
+                "inventory_sha256": manifest.canonical_json_sha256({"entries": []}),
+            },
+        )
     else:
         artifact_directory = tmp_path / "artifacts"
         artifact_directory.mkdir(exist_ok=True)
@@ -210,6 +350,76 @@ def _write_valid_receipt(
             redacted=True,
         )
     return builder.write_success()
+
+
+def _browser_use_receipt_for_schema_condition(
+    tmp_path: Path,
+    condition: str,
+) -> Path:
+    name, provider_model = condition.split(":", 1)
+    provider, model = provider_model.split("/", 1)
+    if name == "browser-use":
+        assert (provider, model) == ("deepseek", "deepseek-chat")
+        return _write_valid_receipt(tmp_path, "msg_send_01", browser_use=True)
+    assert name == "browser-use-full"
+    return _write_valid_receipt(
+        tmp_path,
+        "msg_send_01",
+        browser_use_full=True,
+        browser_use_full_provider=provider,
+        browser_use_full_model=model,
+    )
+
+
+def _browser_use_schema_action_cases() -> list[tuple[str, str]]:
+    payload = json.loads(_BROWSER_USE_SCHEMA_FIXTURE.read_text(encoding="utf-8"))
+    conditions = payload.get("conditions")
+    if not isinstance(conditions, dict):
+        raise AssertionError("Browser Use schema fixture has no conditions")
+    cases: list[tuple[str, str]] = []
+    for condition, fixture in sorted(conditions.items()):
+        if not isinstance(condition, str) or not isinstance(fixture, dict):
+            raise AssertionError("Browser Use schema fixture condition is malformed")
+        actions = fixture.get("actions")
+        if not isinstance(actions, list):
+            raise AssertionError("Browser Use schema fixture has no action list")
+        for action in actions:
+            if not isinstance(action, dict) or not isinstance(action.get("name"), str):
+                raise AssertionError("Browser Use schema fixture action is malformed")
+            cases.append((condition, action["name"]))
+    return cases
+
+
+_BROWSER_USE_ACTION_SCHEMA_CASES = _browser_use_schema_action_cases()
+_BROWSER_USE_ACTION_MODEL_SCHEMA_CONDITIONS = sorted(
+    {condition for condition, _action_name in _BROWSER_USE_ACTION_SCHEMA_CASES}
+)
+
+
+def test_validator_frozen_schema_lookup_does_not_import_browser_use(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_import = builtins.__import__
+
+    def reject_optional_browser_use(name, *args, **kwargs):
+        if name == "browser_use" or name.startswith("browser_use."):
+            raise AssertionError("independent validator imported optional browser_use")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", reject_optional_browser_use)
+    importlib.reload(validate_manifest)
+
+    frozen = validate_manifest._frozen_browser_use_schema_digests(
+        "browser-use-full",
+        "openai",
+        "gpt-4.1-mini",
+    )
+    assert frozen is not None
+    assert frozen["action_model"] == browser_use_policy.schema_digests_for(
+        "browser-use-full",
+        "openai",
+        "gpt-4.1-mini",
+    )["action_model"]
 
 
 def _mutated(path: Path, name: str, mutation) -> Path:
@@ -422,6 +632,32 @@ def test_rejects_trace_digest_tampering(tmp_path: Path) -> None:
     assert any(issue.path == "$.trace.sha256" for issue in issues)
 
 
+def test_trace_reader_rejects_symlink_and_oversize_before_reading(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = _write_valid_receipt(tmp_path, "msg_read_01")
+    artifact = tmp_path / "artifacts" / "valid-msg_read_01.playwright-trace.zip"
+    outside = tmp_path / "outside-trace.zip"
+    outside.write_text("must not be read", encoding="utf-8")
+    artifact.unlink()
+    artifact.symlink_to(outside)
+
+    monkeypatch.setattr(
+        validate_manifest.os,
+        "read",
+        lambda *_args, **_kwargs: pytest.fail("unsafe trace artifact reached os.read"),
+    )
+    issues = validate_manifest.validate_file(path, source_repo=None)
+    assert any(issue.path == "$.trace.path" for issue in issues)
+
+    artifact.unlink()
+    with artifact.open("wb") as handle:
+        handle.truncate(validate_manifest._MAX_TRACE_ARTIFACT_BYTES + 1)
+    issues = validate_manifest.validate_file(path, source_repo=None)
+    assert any(issue.path == "$.trace.path" for issue in issues)
+
+
 def test_rejects_matching_trace_metadata_with_raw_ui_token(tmp_path: Path) -> None:
     path = _write_valid_receipt(tmp_path, "msg_read_01")
     receipt = json.loads(path.read_text(encoding="utf-8"))
@@ -564,6 +800,179 @@ def test_browser_use_full_baseline_contract_validates(
     assert issues == []
 
 
+def test_browser_use_full_rejects_non_allowlisted_provider_model(
+    tmp_path: Path,
+) -> None:
+    path = _write_valid_receipt(
+        tmp_path,
+        "msg_send_01",
+        browser_use_full=True,
+    )
+
+    def tamper(receipt: dict) -> None:
+        receipt["baseline"]["provider"] = "deepseek"
+        receipt["baseline"]["model"] = "deepseek-chat"
+
+    mutated = _mutated(path, "non-allowlisted-model", tamper)
+    issues = validate_manifest.validate_file(mutated, source_repo=None)
+    assert "$.baseline.provider" in {issue.path for issue in issues}
+    assert any("statically allowlisted" in issue.message for issue in issues)
+
+
+def test_browser_use_full_rejects_rehashed_screenshot_schema_drift(
+    tmp_path: Path,
+) -> None:
+    path = _write_valid_receipt(
+        tmp_path,
+        "msg_send_01",
+        browser_use_full=True,
+    )
+
+    def tamper(receipt: dict) -> None:
+        policy = receipt["baseline"]["parameters"]["effective_policy"]
+        screenshot = next(
+            action for action in policy["actions"] if action["name"] == "screenshot"
+        )
+        screenshot["parameter_schema"]["properties"] = {
+            "file_name": {"type": "string"}
+        }
+
+    mutated = _mutated(path, "rehashed-executable-schema-drift", tamper)
+    issues = validate_manifest.validate_file(mutated, source_repo=None)
+    assert any(
+        issue.path == "$.baseline.parameters.effective_policy.actions[10]"
+        and "no-path" in issue.message
+        for issue in issues
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("callback_identity", "browser_use.built_in_navigate"),
+    ],
+)
+def test_browser_use_rejects_rehashed_fixture_navigate_drift(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    path = _write_valid_receipt(tmp_path, "msg_send_01", browser_use=True)
+
+    def tamper(receipt: dict) -> None:
+        policy = receipt["baseline"]["parameters"]["effective_policy"]
+        navigate = next(
+            action for action in policy["actions"] if action["name"] == "navigate"
+        )
+        navigate[field] = value
+
+    mutated = _mutated(path, f"rehashed-navigate-{field}", tamper)
+    issues = validate_manifest.validate_file(mutated, source_repo=None)
+    assert any(
+        issue.path == "$.baseline.parameters.effective_policy.actions[7]"
+        and "fixture-only" in issue.message
+        for issue in issues
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("callback_identity", "browser_use.built_in_search"),
+        ("callback_behavior", "dispatch_external_search_url"),
+    ],
+)
+def test_browser_use_full_rejects_rehashed_fixture_search_drift(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    path = _write_valid_receipt(
+        tmp_path,
+        "msg_send_01",
+        browser_use_full=True,
+    )
+
+    def tamper(receipt: dict) -> None:
+        policy = receipt["baseline"]["parameters"]["effective_policy"]
+        search = next(
+            action for action in policy["actions"] if action["name"] == "search"
+        )
+        search[field] = value
+
+    mutated = _mutated(path, f"rehashed-search-{field}", tamper)
+    issues = validate_manifest.validate_file(mutated, source_repo=None)
+    action_index = list(engine._BROWSER_USE_FULL_ALLOWED_ACTIONS).index("search")
+    assert any(
+        issue.path == f"$.baseline.parameters.effective_policy.actions[{action_index}]"
+        and "fixture-only" in issue.message
+        for issue in issues
+    )
+
+
+@pytest.mark.parametrize(
+    ("condition", "action_name"),
+    _BROWSER_USE_ACTION_SCHEMA_CASES,
+)
+def test_browser_use_rejects_rehashed_frozen_action_schema_drift(
+    tmp_path: Path,
+    condition: str,
+    action_name: str,
+) -> None:
+    path = _browser_use_receipt_for_schema_condition(tmp_path, condition)
+
+    def tamper(receipt: dict) -> None:
+        policy = receipt["baseline"]["parameters"]["effective_policy"]
+        action = next(
+            candidate
+            for candidate in policy["actions"]
+            if candidate["name"] == action_name
+        )
+        action["parameter_schema"]["x-btb-schema-drift"] = True
+        action["parameter_schema_sha256"] = manifest.canonical_json_sha256(
+            action["parameter_schema"]
+        )
+
+    mutated = _mutated(path, f"rehashed-{action_name}-schema-drift", tamper)
+    issues = validate_manifest.validate_file(mutated, source_repo=None)
+    action_index = list(
+        engine._BROWSER_USE_FULL_ALLOWED_ACTIONS
+        if condition.startswith("browser-use-full:")
+        else engine._BROWSER_USE_ALLOWED_ACTIONS
+    ).index(action_name)
+    assert any(
+        issue.path
+        == "$.baseline.parameters.effective_policy.actions"
+        f"[{action_index}].parameter_schema"
+        and "frozen Browser Use action schema" in issue.message
+        for issue in issues
+    )
+
+
+@pytest.mark.parametrize("condition", _BROWSER_USE_ACTION_MODEL_SCHEMA_CONDITIONS)
+def test_browser_use_rejects_rehashed_complete_action_model_schema_drift(
+    tmp_path: Path,
+    condition: str,
+) -> None:
+    path = _browser_use_receipt_for_schema_condition(tmp_path, condition)
+
+    def tamper(receipt: dict) -> None:
+        policy = receipt["baseline"]["parameters"]["effective_policy"]
+        policy["action_model_schema"]["x-btb-schema-drift"] = True
+        policy["action_model_schema_sha256"] = manifest.canonical_json_sha256(
+            policy["action_model_schema"]
+        )
+
+    mutated = _mutated(path, "rehashed-action-model-schema-drift", tamper)
+    issues = validate_manifest.validate_file(mutated, source_repo=None)
+    assert any(
+        issue.path
+        == "$.baseline.parameters.effective_policy.action_model_schema"
+        and "frozen Browser Use ActionModel schema" in issue.message
+        for issue in issues
+    )
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected_path"),
     [
@@ -629,3 +1038,99 @@ def test_browser_use_full_rejects_restricted_policy_as_drift(
     assert "$.baseline.parameters" in paths
     assert "$.baseline.modality_policy" in paths
     assert "$.baseline.capability_policy" in paths
+
+
+def test_browser_use_inventory_artifact_rejects_tampering_and_unsafe_paths(
+    tmp_path: Path,
+) -> None:
+    path = _write_valid_receipt(tmp_path, "msg_send_01", browser_use=True)
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    metadata = receipt["framework_filesystem"]["inventory"]
+    artifact = tmp_path / metadata["path"]
+    artifact.write_text('{"entries":[]}', encoding="utf-8")
+    issues = validate_manifest.validate_file(path, source_repo=None)
+    assert any(
+        issue.path == "$.framework_filesystem.inventory.sha256" for issue in issues
+    )
+
+    unsafe = _mutated(
+        path,
+        "unsafe-sandbox-inventory",
+        lambda value: value["framework_filesystem"]["inventory"].__setitem__(
+            "path", "/private/sandbox.json"
+        ),
+    )
+    issues = validate_manifest.validate_file(unsafe, source_repo=None)
+    assert any(
+        issue.path == "$.framework_filesystem.inventory.path" for issue in issues
+    )
+
+
+def test_browser_use_inventory_rejects_traversal_entries_and_symlink_artifacts(
+    tmp_path: Path,
+) -> None:
+    path = _write_valid_receipt(tmp_path, "msg_send_01", browser_use=True)
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    artifact = tmp_path / receipt["framework_filesystem"]["inventory"]["path"]
+    inventory = json.loads(artifact.read_text(encoding="utf-8"))
+    inventory["entries"].append({"path": "../escape", "type": "directory"})
+    artifact.write_text(json.dumps(inventory), encoding="utf-8")
+    issues = validate_manifest.validate_file(path, source_repo=None)
+    assert any(
+        issue.path == "$.framework_filesystem.inventory.entries[0].path"
+        for issue in issues
+    )
+
+    path = _write_valid_receipt(tmp_path, "msg_read_01", browser_use=True)
+    receipt = json.loads(path.read_text(encoding="utf-8"))
+    artifact = tmp_path / receipt["framework_filesystem"]["inventory"]["path"]
+    outside = tmp_path / "outside-inventory.json"
+    outside.write_text("{}", encoding="utf-8")
+    artifact.unlink()
+    artifact.symlink_to(outside)
+    issues = validate_manifest.validate_file(path, source_repo=None)
+    assert any(
+        issue.path == "$.framework_filesystem.inventory.path" for issue in issues
+    )
+
+
+def test_bounded_inventory_reader_rejects_link_and_oversize_before_reading(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    artifact = artifacts / "inventory.json"
+    outside = tmp_path / "outside-inventory.json"
+    outside.write_text('{"outside":"must not be read"}', encoding="utf-8")
+    artifact.symlink_to(outside)
+
+    def unexpected_read(*_args, **_kwargs):
+        pytest.fail("unsafe inventory artifact reached os.read")
+
+    monkeypatch.setattr(validate_manifest.os, "read", unexpected_read)
+    with pytest.raises(OSError, match="safe path component"):
+        validate_manifest._read_bounded_artifact(tmp_path, "../outside-inventory.json")
+    with pytest.raises(OSError, match="regular file"):
+        validate_manifest._read_bounded_artifact(tmp_path, artifact.name)
+
+    artifact.unlink()
+    artifact.write_bytes(
+        b"x" * (validate_manifest._MAX_SANDBOX_INVENTORY_ARTIFACT_BYTES + 1)
+    )
+    with pytest.raises(OSError, match="bounded size"):
+        validate_manifest._read_bounded_artifact(tmp_path, artifact.name)
+
+    artifact.write_text('{"entries":[]}', encoding="utf-8")
+    replacement = tmp_path / "replacement-inventory.json"
+    replacement.write_text('{"replacement":"must not be read"}', encoding="utf-8")
+    original_open = validate_manifest.os.open
+
+    def swap_after_lstat(name, flags, *args, **kwargs):
+        if name == artifact.name and kwargs.get("dir_fd") is not None:
+            os.replace(replacement, artifact)
+        return original_open(name, flags, *args, **kwargs)
+
+    monkeypatch.setattr(validate_manifest.os, "open", swap_after_lstat)
+    with pytest.raises(OSError, match="changed while opening"):
+        validate_manifest._read_bounded_artifact(tmp_path, artifact.name)

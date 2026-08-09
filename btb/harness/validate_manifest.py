@@ -10,8 +10,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
+import os
 import re
+import stat
 import subprocess
 import zipfile
 from collections import Counter
@@ -21,6 +24,8 @@ from typing import Any, Iterable, Sequence
 
 from jsonschema import Draft202012Validator, FormatChecker
 
+from btb.harness import browser_use_policy
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "schemas" / "manifest-v2.schema.json"
 TASK_DEFINITIONS_DIR = Path(__file__).resolve().parents[1] / "tasks" / "definitions"
@@ -29,6 +34,14 @@ RELEASE_VERSION = "0.1.0"
 PARSER_VERSION = "btb-claim-v1"
 EVALUATOR_VERSION = "btb-full-state-v1"
 _SUCCESS = "success"
+_BROWSER_USE_VERSION = browser_use_policy.BROWSER_USE_VERSION
+_MAX_SANDBOX_INVENTORY_ENTRIES = 4_096
+_MAX_SANDBOX_INVENTORY_FILE_BYTES = 64 * 1024 * 1024
+_MAX_SANDBOX_INVENTORY_TOTAL_BYTES = 256 * 1024 * 1024
+_MAX_SANDBOX_INVENTORY_ARTIFACT_BYTES = 16 * 1024 * 1024
+_MAX_TRACE_ARTIFACT_BYTES = 64 * 1024 * 1024
+_MAX_TRACE_ZIP_MEMBERS = 4_096
+_MAX_TRACE_ZIP_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
 _FAILURE_STATUSES = {
     "setup_error",
     "baseline_error",
@@ -99,6 +112,13 @@ _BROWSER_USE_FULL_ALLOWED_ACTIONS = (
     "switch",
     "wait",
 )
+_BROWSER_USE_FULL_PROVIDER_MODELS = frozenset(
+    {
+        ("anthropic", "claude-sonnet-4-0"),
+        ("openai", "gpt-4.1-mini"),
+    }
+)
+_FIXTURE_ACTION_CALLBACKS = browser_use_policy.FIXTURE_ACTION_CALLBACKS
 _TRACE_UI_HEADER_RE = re.compile(
     rb'"name"\s*:\s*"X-BTB-UI-Token"\s*,\s*"value"\s*:\s*"([^"]+)"',
     re.IGNORECASE,
@@ -129,6 +149,33 @@ def _canonical_json_sha256(value: object) -> str:
         separators=(",", ":"),
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def _frozen_browser_use_schema_digests(
+    name: object,
+    provider: object,
+    model: object,
+) -> dict[str, object] | None:
+    """Read pure-data schema identities without importing optional Browser Use."""
+
+    if not all(isinstance(value, str) for value in (name, provider, model)):
+        return None
+    try:
+        frozen = browser_use_policy.schema_digests_for(name, provider, model)
+    except ValueError:
+        return None
+    action_digests = frozen.get("actions")
+    action_model_digest = frozen.get("action_model")
+    if not isinstance(action_digests, dict) or not isinstance(
+        action_model_digest,
+        str,
+    ):
+        return None
+    return {
+        "condition": browser_use_policy.schema_condition(name, provider, model),
+        "actions": action_digests,
+        "action_model": action_model_digest,
+    }
 
 
 def _prompt_sha256(text: str) -> str:
@@ -803,11 +850,18 @@ def _baseline_invariants(receipt: dict, issues: list[ValidationIssue]) -> None:
             "headless": True,
             "browser_profile": {
                 "accept_downloads": False,
+                "auto_download_pdfs": False,
                 "allowed_origins": "run_fixture_only",
                 "captcha_solver": False,
                 "cross_origin_iframes": False,
                 "default_extensions": False,
                 "deterministic_rendering": True,
+                "downloads_path": "sandbox_root_only",
+                "har": False,
+                "storage_state": False,
+                "traces": False,
+                "user_data_dir": "sandbox_root_only",
+                "video": False,
             },
             "use_judge": False,
             "use_vision": use_vision,
@@ -820,21 +874,252 @@ def _baseline_invariants(receipt: dict, issues: list[ValidationIssue]) -> None:
                 "top_p": None,
                 "seed": None,
             },
+            "framework_filesystem": {
+                "child_process": True,
+                "inventory": "bounded_lstat_sha256",
+                "parent_process_group_timeout": True,
+                "root": "unique_system_temp_outside_repository_and_home",
+                "terminal_cleanup_receipt": True,
+            },
         }
         if max_actions_per_step is not None:
             expected_parameters["max_actions_per_step"] = max_actions_per_step
+            expected_parameters["framework_compatibility"] = {
+                "constructor_use_vision": "auto",
+                "effective_use_vision_bound_after_construction": True,
+                "post_agent_semantic_audit": True,
+            }
         if framework.get("name") != "browser-use":
             _issue(issues, "$.baseline.framework.name", "must equal 'browser-use'")
+        if framework.get("installed_version") != _BROWSER_USE_VERSION:
+            _issue(
+                issues,
+                "$.baseline.framework.installed_version",
+                f"must equal the frozen Browser Use version {_BROWSER_USE_VERSION}",
+            )
         if baseline.get("provider") not in {"deepseek", "openai", "anthropic"}:
             _issue(issues, "$.baseline.provider", "must identify a supported provider")
         model = baseline.get("model")
         if not isinstance(model, str) or not model.strip():
             _issue(issues, "$.baseline.model", "must identify the exact model")
-        if parameters != expected_parameters:
+        provider_model = (
+            (baseline.get("provider"), model) if isinstance(model, str) else None
+        )
+        if (
+            name == "browser-use-full"
+            and provider_model not in _BROWSER_USE_FULL_PROVIDER_MODELS
+        ):
+            _issue(
+                issues,
+                "$.baseline.provider",
+                "browser-use-full must use a statically allowlisted provider/model",
+            )
+        frozen_schema_digests = _frozen_browser_use_schema_digests(
+            name,
+            baseline.get("provider"),
+            model,
+        )
+        if frozen_schema_digests is None:
+            _issue(
+                issues,
+                "$.baseline.provider",
+                "must identify one frozen Browser Use schema condition",
+            )
+        static_parameters = dict(parameters)
+        effective_policy = static_parameters.pop("effective_policy", None)
+        if static_parameters != expected_parameters:
             _issue(
                 issues,
                 "$.baseline.parameters",
                 "must equal the frozen learned-baseline configuration",
+            )
+        if effective_policy == {"status": "unobserved"}:
+            if receipt.get("status") == _SUCCESS:
+                _issue(
+                    issues,
+                    "$.baseline.parameters.effective_policy",
+                    "successful learned baseline requires an observed policy",
+                )
+        elif isinstance(effective_policy, dict) and effective_policy.get("status") == (
+            "observed"
+        ):
+            if effective_policy.get("browser_use_version") != _BROWSER_USE_VERSION:
+                _issue(
+                    issues,
+                    "$.baseline.parameters.effective_policy",
+                    "must observe the frozen Browser Use version",
+                )
+            effective_settings = _as_dict(effective_policy.get("settings"))
+            expected_effective_settings = {
+                "available_file_paths": [],
+                "directly_open_url": True,
+                "display_files_in_done_text": False,
+                "generate_gif": False,
+                "max_actions_per_step": (
+                    max_actions_per_step if max_actions_per_step is not None else 5
+                ),
+                "message_compaction": False,
+                "save_conversation_path": None,
+                "use_judge": False,
+                "use_vision": use_vision,
+            }
+            if effective_settings != expected_effective_settings:
+                _issue(
+                    issues,
+                    "$.baseline.parameters.effective_policy.settings",
+                    "must equal the effective frozen Agent settings",
+                )
+            if effective_policy.get("framework_paths") != {
+                "agent_directory": "sandbox_root_only",
+                "file_system_base": "sandbox_root_only",
+                "file_system_data": "sandbox_root_only",
+                "screenshot_storage": "sandbox_root_only",
+            }:
+                _issue(
+                    issues,
+                    "$.baseline.parameters.effective_policy.framework_paths",
+                    "must bind all confined framework-managed paths",
+                )
+            expected_roles = {
+                "fallback": None,
+                "judge": {
+                    "active": False,
+                    "model": baseline.get("model"),
+                    "provider": baseline.get("provider"),
+                },
+                "page_extraction": {
+                    "model": baseline.get("model"),
+                    "provider": baseline.get("provider"),
+                },
+                "primary": {
+                    "model": baseline.get("model"),
+                    "provider": baseline.get("provider"),
+                },
+            }
+            if effective_policy.get("llm_roles") != expected_roles:
+                _issue(
+                    issues,
+                    "$.baseline.parameters.effective_policy.llm_roles",
+                    "must bind primary, page extraction, inactive judge, and no fallback",
+                )
+            if effective_policy.get("action_model_names") != list(allowed_actions):
+                _issue(
+                    issues,
+                    "$.baseline.parameters.effective_policy.action_model_names",
+                    "must equal the exact executable action names",
+                )
+            action_model_schema = effective_policy.get("action_model_schema")
+            if not isinstance(action_model_schema, dict):
+                _issue(
+                    issues,
+                    "$.baseline.parameters.effective_policy.action_model_schema",
+                    "must contain the complete normalized Agent ActionModel schema",
+                )
+            elif frozen_schema_digests is not None:
+                action_model_digest = _canonical_json_sha256(action_model_schema)
+                if (
+                    effective_policy.get("action_model_schema_sha256")
+                    != action_model_digest
+                ):
+                    _issue(
+                        issues,
+                        "$.baseline.parameters.effective_policy"
+                        ".action_model_schema_sha256",
+                        "must equal the canonical ActionModel schema digest",
+                    )
+                if action_model_digest != frozen_schema_digests["action_model"]:
+                    _issue(
+                        issues,
+                        "$.baseline.parameters.effective_policy.action_model_schema",
+                        "differs from the frozen Browser Use ActionModel schema",
+                    )
+                if (
+                    effective_policy.get("schema_condition")
+                    != frozen_schema_digests["condition"]
+                ):
+                    _issue(
+                        issues,
+                        "$.baseline.parameters.effective_policy.schema_condition",
+                        "must identify the frozen provider/model schema condition",
+                    )
+            effective_actions = effective_policy.get("actions")
+            action_names = (
+                [action.get("name") for action in effective_actions]
+                if isinstance(effective_actions, list)
+                and all(isinstance(action, dict) for action in effective_actions)
+                else None
+            )
+            if action_names != list(allowed_actions):
+                _issue(
+                    issues,
+                    "$.baseline.parameters.effective_policy.actions",
+                    "must contain the exact executable action registry",
+                )
+            elif isinstance(effective_actions, list):
+                for index, action in enumerate(effective_actions):
+                    schema = action.get("parameter_schema")
+                    if not isinstance(schema, dict):
+                        _issue(
+                            issues,
+                            "$.baseline.parameters.effective_policy"
+                            f".actions[{index}]",
+                            "must bind one normalized action schema",
+                        )
+                        continue
+                    schema_digest = _canonical_json_sha256(schema)
+                    if action.get("parameter_schema_sha256") != schema_digest:
+                        _issue(
+                            issues,
+                            "$.baseline.parameters.effective_policy.actions"
+                            f"[{index}].parameter_schema_sha256",
+                            "must equal the canonical action schema digest",
+                        )
+                    action_name = action.get("name")
+                    expected_schema_digest = (
+                        frozen_schema_digests["actions"].get(action_name)
+                        if frozen_schema_digests is not None
+                        and isinstance(action_name, str)
+                        else None
+                    )
+                    if schema_digest != expected_schema_digest:
+                        _issue(
+                            issues,
+                            "$.baseline.parameters.effective_policy.actions"
+                            f"[{index}].parameter_schema",
+                            "differs from the frozen Browser Use action schema",
+                        )
+                    expected_callback = _FIXTURE_ACTION_CALLBACKS.get(action_name)
+                    if expected_callback is not None and (
+                        action.get("callback_identity")
+                        != expected_callback["identity"]
+                        or action.get("callback_behavior")
+                        != expected_callback["behavior"]
+                    ):
+                        _issue(
+                            issues,
+                            "$.baseline.parameters.effective_policy.actions"
+                            f"[{index}]",
+                            f"{action_name} must be the fixture-only callback",
+                        )
+                    if action.get("name") == "screenshot" and name == "browser-use-full":
+                        if (
+                            schema.get("properties") != {}
+                            or action.get("callback_identity")
+                            != "btb.no_file_screenshot.v1"
+                            or action.get("callback_behavior")
+                            != "request_next_observation_without_file_write"
+                        ):
+                            _issue(
+                                issues,
+                                "$.baseline.parameters.effective_policy.actions"
+                                f"[{index}]",
+                                "screenshot must be the no-path benchmark callback",
+                            )
+        else:
+            _issue(
+                issues,
+                "$.baseline.parameters.effective_policy",
+                "must be explicitly unobserved or contain one observed policy",
             )
         if (
             isinstance(configured_steps, bool)
@@ -851,14 +1136,48 @@ def _baseline_invariants(receipt: dict, issues: list[ValidationIssue]) -> None:
             "visible_page_controls_only": True,
             "javascript_console": False,
             "direct_api": False,
-            "filesystem": False,
+            "filesystem": {
+                "agent_arbitrary_paths": False,
+                "framework_owned": True,
+                "mode": "isolated_ephemeral_per_run",
+                "os_mandatory_access_control": False,
+            },
             "database": False,
             "enforcement": {
                 "agent_tools_allowed": list(allowed_actions),
                 "agent_tools_excluded": list(excluded_actions),
                 "fixture_write_api_requires_ui_token": True,
-                "navigation": "run_fixture_origin_only",
+                "navigation": {
+                    "action": _FIXTURE_ACTION_CALLBACKS["navigate"]["identity"],
+                    "pre_dispatch": "resolve_http_https_and_require_exact_fixture_origin",
+                    "redirects": {
+                        "browser_profile": "allowed_domains_configured",
+                        "watchdog": "http_https_defense_in_depth_after_dispatch",
+                        "post_dispatch": "detect_off_fixture_recover_and_stop",
+                    },
+                    "fixture_click_controls": (
+                        "controlled_fixture_has_no_link_or_"
+                        "navigation_producing_click_controls"
+                    ),
+                },
+                "external_search": {
+                    "action": (
+                        _FIXTURE_ACTION_CALLBACKS["search"]["identity"]
+                        if name == "browser-use-full"
+                        else "excluded"
+                    ),
+                    "behavior": (
+                        _FIXTURE_ACTION_CALLBACKS["search"]["behavior"]
+                        if name == "browser-use-full"
+                        else "excluded"
+                    ),
+                },
                 "telemetry": False,
+                "screenshot_action": (
+                    "benchmark_no_file_next_observation"
+                    if name == "browser-use-full"
+                    else "excluded"
+                ),
             },
         }
         trace = _as_dict(receipt.get("trace"))
@@ -940,6 +1259,343 @@ def _status_invariants(receipt: dict, issues: list[ValidationIssue]) -> None:
                 "$.evaluation.headline_outcome",
                 "must equal $.outcome",
             )
+
+
+def _framework_filesystem_invariants(
+    receipt: dict, issues: list[ValidationIssue]
+) -> None:
+    """Validate terminal framework filesystem state without constructing Browser Use."""
+
+    name = _as_dict(receipt.get("baseline")).get("name")
+    value = receipt.get("framework_filesystem")
+    learned = name in {"browser-use", "browser-use-full"}
+    if not learned:
+        if value is not None:
+            _issue(
+                issues,
+                "$.framework_filesystem",
+                "deterministic baselines must mark framework filesystem not applicable",
+            )
+        return
+    filesystem = _as_dict(value)
+    state = filesystem.get("state")
+    inventory = filesystem.get("inventory")
+    cleanup_error = filesystem.get("cleanup_error")
+    verified = filesystem.get("cleanup_verified")
+    if state == "not_created":
+        if inventory is not None or cleanup_error is not None or verified is not False:
+            _issue(
+                issues,
+                "$.framework_filesystem",
+                "not_created must not claim inventory or cleanup",
+            )
+    elif state == "cleaned":
+        if cleanup_error is not None or verified is not True:
+            _issue(
+                issues,
+                "$.framework_filesystem",
+                "cleaned must verify removal without a cleanup error",
+            )
+        if receipt.get("status") == _SUCCESS and not isinstance(inventory, dict):
+            _issue(
+                issues,
+                "$.framework_filesystem.inventory",
+                "successful learned baseline requires a bound sandbox inventory",
+            )
+    elif state == "cleanup_failed":
+        if verified is not False or not isinstance(cleanup_error, dict):
+            _issue(
+                issues,
+                "$.framework_filesystem",
+                "cleanup_failed must retain a cleanup error and no verification claim",
+            )
+    else:
+        _issue(
+            issues,
+            "$.framework_filesystem.state",
+            "must be not_created, cleaned, or cleanup_failed",
+        )
+
+
+def _safe_artifact_path(value: object) -> Path | None:
+    if not isinstance(value, str):
+        return None
+    path = Path(value)
+    if (
+        path.is_absolute()
+        or path.parts[:1] != ("artifacts",)
+        or len(path.parts) != 2
+        or any(part in {"", ".", ".."} for part in path.parts)
+        or path.as_posix() != value
+    ):
+        return None
+    return path
+
+
+def _read_bounded_artifact(
+    receipt_directory: Path,
+    name: str,
+    *,
+    max_bytes: int = _MAX_SANDBOX_INVENTORY_ARTIFACT_BYTES,
+    label: str = "inventory",
+) -> bytes:
+    """Read one receipt artifact without following links or trusting path checks."""
+
+    if not name or Path(name).name != name or name in {".", ".."}:
+        raise OSError(f"{label} artifact name is not one safe path component")
+    if max_bytes < 0:
+        raise ValueError("artifact byte limit must be nonnegative")
+    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+        raise OSError(f"safe {label} artifact validation requires no-follow directory opens")
+    flags = os.O_RDONLY | os.O_NOFOLLOW
+    root_status = receipt_directory.lstat()
+    root_fd = os.open(receipt_directory, flags | os.O_DIRECTORY)
+    try:
+        root_actual = os.fstat(root_fd)
+        if (
+            not stat.S_ISDIR(root_actual.st_mode)
+            or root_actual.st_dev != root_status.st_dev
+            or root_actual.st_ino != root_status.st_ino
+        ):
+            raise OSError(f"receipt directory changed while validating {label} artifact")
+        artifacts_expected = os.stat("artifacts", dir_fd=root_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(artifacts_expected.st_mode) or stat.S_ISLNK(
+            artifacts_expected.st_mode
+        ):
+            raise OSError(f"{label} artifact directory is not a real directory")
+        artifacts_fd = os.open(
+            "artifacts", flags | os.O_DIRECTORY, dir_fd=root_fd
+        )
+        try:
+            artifacts_actual = os.fstat(artifacts_fd)
+            if (
+                artifacts_actual.st_dev != artifacts_expected.st_dev
+                or artifacts_actual.st_ino != artifacts_expected.st_ino
+            ):
+                raise OSError(f"{label} artifact directory changed while opening")
+            expected = os.stat(name, dir_fd=artifacts_fd, follow_symlinks=False)
+            if not stat.S_ISREG(expected.st_mode) or stat.S_ISLNK(expected.st_mode):
+                raise OSError(f"{label} artifact is not a regular file")
+            if expected.st_size > max_bytes:
+                raise OSError(f"{label} artifact exceeds the bounded size limit")
+            descriptor = os.open(name, flags, dir_fd=artifacts_fd)
+            try:
+                actual = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(actual.st_mode)
+                    or actual.st_dev != expected.st_dev
+                    or actual.st_ino != expected.st_ino
+                    or actual.st_size != expected.st_size
+                ):
+                    raise OSError(f"{label} artifact changed while opening")
+                content = os.read(descriptor, max_bytes + 1)
+                after = os.fstat(descriptor)
+                if (
+                    len(content) != expected.st_size
+                    or len(content) > max_bytes
+                    or after.st_dev != expected.st_dev
+                    or after.st_ino != expected.st_ino
+                    or after.st_size != expected.st_size
+                ):
+                    raise OSError(f"{label} artifact changed while reading")
+                return content
+            finally:
+                os.close(descriptor)
+        finally:
+            os.close(artifacts_fd)
+    finally:
+        os.close(root_fd)
+
+
+def _framework_inventory_artifact_errors(
+    receipt: object, receipt_path: Path
+) -> list[ValidationIssue]:
+    if not isinstance(receipt, dict):
+        return []
+    filesystem = receipt.get("framework_filesystem")
+    if not isinstance(filesystem, dict) or not isinstance(
+        filesystem.get("inventory"), dict
+    ):
+        return []
+    metadata = filesystem["inventory"]
+    relative_path = _safe_artifact_path(metadata.get("path"))
+    if relative_path is None:
+        return [
+            ValidationIssue(
+                "$.framework_filesystem.inventory.path",
+                "must be one safe artifact path under the receipt directory",
+            )
+        ]
+    try:
+        content = _read_bounded_artifact(
+            receipt_path.parent,
+            relative_path.name,
+            max_bytes=_MAX_SANDBOX_INVENTORY_ARTIFACT_BYTES,
+            label="inventory",
+        )
+        inventory = json.loads(content)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        return [
+            ValidationIssue(
+                "$.framework_filesystem.inventory.path",
+                f"cannot read bound inventory artifact: {exc}",
+            )
+        ]
+    issues: list[ValidationIssue] = []
+    if len(content) != metadata.get("size_bytes"):
+        issues.append(
+            ValidationIssue(
+                "$.framework_filesystem.inventory.size_bytes",
+                "does not match the bound artifact",
+            )
+        )
+    if hashlib.sha256(content).hexdigest() != metadata.get("sha256"):
+        issues.append(
+            ValidationIssue(
+                "$.framework_filesystem.inventory.sha256",
+                "does not match the bound artifact",
+            )
+        )
+    if not isinstance(inventory, dict):
+        return issues + [
+            ValidationIssue(
+                "$.framework_filesystem.inventory",
+                "artifact must contain an inventory object",
+            )
+        ]
+    if set(inventory) != {
+        "version",
+        "entries",
+        "entry_count",
+        "file_count",
+        "total_bytes",
+        "inventory_sha256",
+    } or inventory.get("version") != 1:
+        issues.append(
+            ValidationIssue(
+                "$.framework_filesystem.inventory",
+                "artifact must contain the exact version-1 bounded inventory shape",
+            )
+        )
+    entries = inventory.get("entries")
+    if not isinstance(entries, list):
+        return issues + [
+            ValidationIssue(
+                "$.framework_filesystem.inventory.entries",
+                "must be a list",
+            )
+        ]
+    if len(entries) > _MAX_SANDBOX_INVENTORY_ENTRIES:
+        issues.append(
+            ValidationIssue(
+                "$.framework_filesystem.inventory.entries",
+                "exceeds the bounded sandbox entry limit",
+            )
+        )
+    paths: list[str] = []
+    total_bytes = 0
+    file_count = 0
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            issues.append(
+                ValidationIssue(
+                    f"$.framework_filesystem.inventory.entries[{index}]",
+                    "must be an object",
+                )
+            )
+            continue
+        path = entry.get("path")
+        safe = _safe_inventory_path(path)
+        if safe is None:
+            issues.append(
+                ValidationIssue(
+                    f"$.framework_filesystem.inventory.entries[{index}].path",
+                    "must be a safe relative sandbox path",
+                )
+            )
+        elif isinstance(path, str):
+            paths.append(path)
+        entry_type = entry.get("type")
+        if entry_type == "directory":
+            if set(entry) != {"path", "type"}:
+                issues.append(
+                    ValidationIssue(
+                        f"$.framework_filesystem.inventory.entries[{index}]",
+                        "directory entry must contain only path and type",
+                    )
+                )
+        elif entry_type == "regular_file":
+            size = entry.get("size_bytes")
+            digest = entry.get("sha256")
+            if (
+                set(entry) != {"path", "type", "size_bytes", "sha256"}
+                or isinstance(size, bool)
+                or not isinstance(size, int)
+                or size < 0
+                or size > _MAX_SANDBOX_INVENTORY_FILE_BYTES
+                or not isinstance(digest, str)
+                or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            ):
+                issues.append(
+                    ValidationIssue(
+                        f"$.framework_filesystem.inventory.entries[{index}]",
+                        "regular file entry must have a nonnegative size and SHA256",
+                    )
+                )
+            else:
+                total_bytes += size
+                file_count += 1
+        else:
+            issues.append(
+                ValidationIssue(
+                    f"$.framework_filesystem.inventory.entries[{index}].type",
+                    "must be directory or regular_file",
+                )
+            )
+    if paths != sorted(paths) or len(paths) != len(set(paths)):
+        issues.append(
+            ValidationIssue(
+                "$.framework_filesystem.inventory.entries",
+                "paths must be sorted and unique",
+            )
+        )
+    if total_bytes > _MAX_SANDBOX_INVENTORY_TOTAL_BYTES:
+        issues.append(
+            ValidationIssue(
+                "$.framework_filesystem.inventory.total_bytes",
+                "exceeds the bounded sandbox byte limit",
+            )
+        )
+    expected_digest = _canonical_json_sha256({"entries": entries})
+    comparisons = {
+        "entry_count": len(entries),
+        "file_count": file_count,
+        "total_bytes": total_bytes,
+        "inventory_sha256": expected_digest,
+    }
+    for field, expected in comparisons.items():
+        if inventory.get(field) != expected or metadata.get(field) != expected:
+            issues.append(
+                ValidationIssue(
+                    f"$.framework_filesystem.inventory.{field}",
+                    "does not match the bounded inventory artifact",
+                )
+            )
+    return issues
+
+
+def _safe_inventory_path(value: object) -> Path | None:
+    if not isinstance(value, str) or not value:
+        return None
+    path = Path(value)
+    if (
+        path.is_absolute()
+        or "\\" in value
+        or any(part in {"", ".", ".."} for part in path.parts)
+        or path.as_posix() != value
+    ):
+        return None
+    return path
 
 
 def _snapshot_identity_invariants(receipt: dict, issues: list[ValidationIssue]) -> None:
@@ -1386,6 +2042,7 @@ def invariant_errors(
     issues: list[ValidationIssue] = []
     _content_invariants(receipt, issues)
     _baseline_invariants(receipt, issues)
+    _framework_filesystem_invariants(receipt, issues)
     _task_registry_invariants(receipt, issues)
     _status_invariants(receipt, issues)
     _snapshot_identity_invariants(receipt, issues)
@@ -1413,32 +2070,54 @@ def validate_receipt(
     return sorted(set(issues))
 
 
+def _trace_zip_tokens(content: bytes) -> set[bytes]:
+    """Scan a bounded ZIP trace in memory without unbounded decompression."""
+
+    with zipfile.ZipFile(io.BytesIO(content), "r") as archive:
+        infos = archive.infolist()
+        if len(infos) > _MAX_TRACE_ZIP_MEMBERS:
+            raise ValueError("trace ZIP exceeds the bounded member limit")
+        total = 0
+        discovered: set[bytes] = set()
+        for info in infos:
+            if info.is_dir():
+                continue
+            if info.file_size < 0 or info.file_size > _MAX_TRACE_ZIP_UNCOMPRESSED_BYTES:
+                raise ValueError("trace ZIP member exceeds the bounded byte limit")
+            total += info.file_size
+            if total > _MAX_TRACE_ZIP_UNCOMPRESSED_BYTES:
+                raise ValueError("trace ZIP exceeds the bounded uncompressed byte limit")
+            with archive.open(info, "r") as member:
+                payload = member.read(info.file_size + 1)
+            if len(payload) != info.file_size:
+                raise ValueError("trace ZIP member changed while reading")
+            for pattern in (_TRACE_UI_HEADER_RE, _TRACE_UI_SCRIPT_RE):
+                discovered.update(pattern.findall(payload))
+        return discovered
+
+
 def _trace_artifact_errors(receipt: object, receipt_path: Path) -> list[ValidationIssue]:
     if not isinstance(receipt, dict) or receipt.get("status") != _SUCCESS:
         return []
     trace = receipt.get("trace")
     if not isinstance(trace, dict):
         return []
-    relative = trace.get("path")
-    if not isinstance(relative, str):
-        return []
-    relative_path = Path(relative)
-    if (
-        relative_path.is_absolute()
-        or relative_path.parts[:1] != ("artifacts",)
-        or len(relative_path.parts) != 2
-        or ".." in relative_path.parts
-    ):
+    relative_path = _safe_artifact_path(trace.get("path"))
+    if relative_path is None:
         return [
             ValidationIssue(
                 "$.trace.path",
                 "must be one safe artifact path under the receipt directory",
             )
         ]
-    artifact = receipt_path.parent / relative_path
     try:
-        content = artifact.read_bytes()
-    except OSError as exc:
+        content = _read_bounded_artifact(
+            receipt_path.parent,
+            relative_path.name,
+            max_bytes=_MAX_TRACE_ARTIFACT_BYTES,
+            label="trace",
+        )
+    except (OSError, ValueError) as exc:
         return [ValidationIssue("$.trace.path", f"cannot read bound trace artifact: {exc}")]
     issues: list[ValidationIssue] = []
     if len(content) != trace.get("size_bytes"):
@@ -1449,19 +2128,12 @@ def _trace_artifact_errors(receipt: object, receipt_path: Path) -> list[Validati
         issues.append(ValidationIssue("$.trace.sha256", "does not match the bound artifact"))
     if trace.get("format") == "playwright-trace-zip":
         try:
-            with zipfile.ZipFile(artifact, "r") as archive:
-                members = [archive.read(info.filename) for info in archive.infolist()]
-        except (OSError, zipfile.BadZipFile) as exc:
+            discovered = _trace_zip_tokens(content)
+        except (OSError, RuntimeError, ValueError, zipfile.BadZipFile) as exc:
             issues.append(
                 ValidationIssue("$.trace.path", f"is not a readable trace ZIP: {exc}")
             )
         else:
-            discovered = {
-                token
-                for member in members
-                for pattern in (_TRACE_UI_HEADER_RE, _TRACE_UI_SCRIPT_RE)
-                for token in pattern.findall(member)
-            }
             if any(token != _TRACE_UI_TOKEN_REPLACEMENT for token in discovered):
                 issues.append(
                     ValidationIssue(
@@ -1489,6 +2161,7 @@ def validate_file(
         source_repo=source_repo,
     )
     issues.extend(_trace_artifact_errors(receipt, path))
+    issues.extend(_framework_inventory_artifact_errors(receipt, path))
     return sorted(set(issues))
 
 

@@ -388,9 +388,11 @@ class ReceiptBuilder:
     evaluation: dict | None = None
     outcome: str | None = None
     trace: dict | None = None
+    framework_filesystem: dict | None = None
     evidence_failures: list[dict[str, str]] = field(default_factory=list)
     _finalized_path: Path | None = field(default=None, init=False, repr=False)
     _sensitive_values: set[str] = field(default_factory=set, init=False, repr=False)
+    _effective_baseline_bound: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         _require_safe_artifact_component(self.run_id, name="run_id")
@@ -433,6 +435,34 @@ class ReceiptBuilder:
         if self.prompt_text is not None:
             raise RuntimeError("prompt provenance has already been recorded")
         self.prompt_text = text
+
+    def bind_effective_baseline(self, baseline: BaselineProvenance) -> None:
+        """Replace desired provenance once with its observed semantic policy."""
+
+        if self._effective_baseline_bound:
+            raise RuntimeError("effective baseline provenance has already been bound")
+        current = self.baseline.to_dict()
+        observed = baseline.to_dict()
+        current_parameters = current.get("parameters")
+        observed_parameters = observed.get("parameters")
+        if not isinstance(current_parameters, dict) or not isinstance(
+            observed_parameters, dict
+        ):
+            raise ValueError("baseline parameters must be objects")
+        current_policy = current_parameters.pop("effective_policy", None)
+        observed_policy = observed_parameters.pop("effective_policy", None)
+        if current_policy != {"status": "unobserved"}:
+            raise ValueError("baseline is not awaiting an effective policy observation")
+        if not isinstance(observed_policy, dict) or observed_policy.get("status") != (
+            "observed"
+        ):
+            raise ValueError("effective baseline policy must be observed")
+        if current != observed:
+            raise ValueError(
+                "effective baseline binding may only replace the observation fields"
+            )
+        self.baseline = copy.deepcopy(baseline)
+        self._effective_baseline_bound = True
 
     def register_sensitive_value(self, value: str) -> None:
         """Register a runtime-only secret that must never enter receipt text."""
@@ -523,6 +553,73 @@ class ReceiptBuilder:
         self.trace = metadata
         return metadata
 
+    def register_framework_sandbox(self, sandbox_root: Path) -> None:
+        """Register the private runtime root before any trace or failure persists."""
+
+        self.register_sensitive_value(str(sandbox_root))
+
+    def bind_framework_filesystem(
+        self,
+        *,
+        state: str,
+        inventory: dict | None,
+        cleanup_error: Exception | None = None,
+    ) -> dict[str, object]:
+        """Bind the terminal Browser Use filesystem lifecycle without its root path."""
+
+        if self.framework_filesystem is not None:
+            raise RuntimeError("framework filesystem lifecycle has already been bound")
+        if state not in {"not_created", "cleaned", "cleanup_failed"}:
+            raise ValueError("framework filesystem state is invalid")
+        if state == "not_created" and inventory is not None:
+            raise ValueError("an uncreated sandbox cannot have an inventory")
+        value: dict[str, object] = {
+            "state": state,
+            "cleanup_verified": state == "cleaned",
+            "inventory": None,
+            "cleanup_error": None,
+        }
+        if inventory is not None:
+            try:
+                payload = canonical_json_bytes(inventory) + b"\n"
+                path = write_artifact(
+                    payload,
+                    run_id=self.run_id,
+                    suffix="browser-use-sandbox-inventory.json",
+                    out_dir=self.artifact_directory(),
+                )
+                value["inventory"] = {
+                    "path": f"artifacts/{path.name}",
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                    "size_bytes": len(payload),
+                    "entry_count": inventory.get("entry_count"),
+                    "file_count": inventory.get("file_count"),
+                    "total_bytes": inventory.get("total_bytes"),
+                    "inventory_sha256": inventory.get("inventory_sha256"),
+                }
+            except Exception:
+                # Preserve the terminal cleanup fact for a failure receipt even
+                # when the separate inventory artifact cannot be published.
+                self.framework_filesystem = value
+                raise
+        if cleanup_error is not None:
+            message, _redacted = redact_text(
+                str(cleanup_error), sensitive_values=self.redaction_values
+            )
+            value["cleanup_error"] = {
+                "type": cleanup_error.__class__.__name__, "message": message
+            }
+        self.framework_filesystem = value
+        return value
+
+    def _ensure_learned_filesystem_state(self) -> None:
+        if self.baseline.name in {"browser-use", "browser-use-full"} and (
+            self.framework_filesystem is None
+        ):
+            self.bind_framework_filesystem(
+                state="not_created", inventory=None, cleanup_error=None
+            )
+
     def _receipt(
         self,
         *,
@@ -568,6 +665,7 @@ class ReceiptBuilder:
             },
             "agent_claim": copy.deepcopy(self.agent_claim),
             "trace": copy.deepcopy(self.trace),
+            "framework_filesystem": copy.deepcopy(self.framework_filesystem),
             "injection_report": copy.deepcopy(self.injection_report),
             "before_snapshot": copy.deepcopy(self.before_snapshot),
             "after_snapshot": copy.deepcopy(self.after_snapshot),
@@ -582,6 +680,24 @@ class ReceiptBuilder:
 
     def write_success(self) -> Path:
         self.ensure_canonical_source()
+        if self.baseline.name in {"browser-use", "browser-use-full"}:
+            effective = self.baseline.parameters.get("effective_policy")
+            if not isinstance(effective, dict) or effective.get("status") != "observed":
+                raise ValueError(
+                    "successful learned-baseline receipt requires observed semantic "
+                    "policy provenance"
+                )
+            filesystem = self.framework_filesystem
+            if (
+                not isinstance(filesystem, dict)
+                or filesystem.get("state") != "cleaned"
+                or filesystem.get("cleanup_verified") is not True
+                or not isinstance(filesystem.get("inventory"), dict)
+            ):
+                raise ValueError(
+                    "successful learned-baseline receipt requires a cleaned, verified "
+                    "framework filesystem inventory"
+                )
         if self.task_definition is None:
             raise ValueError("successful receipt requires complete task provenance")
         if self.prompt_text is None:
@@ -610,6 +726,7 @@ class ReceiptBuilder:
     ) -> Path:
         if not stage:
             raise ValueError("failure stage must not be empty")
+        self._ensure_learned_filesystem_state()
         message, _redacted = redact_text(
             str(exc),
             sensitive_values=self.redaction_values,
