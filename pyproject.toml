@@ -10,6 +10,12 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "Raghav" }]
+keywords = [
+  "agent evaluation",
+  "browser agents",
+  "reproducible research",
+  "transactional safety",
+]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
@@ -26,6 +32,11 @@ dependencies = [
   "pydantic>=2.7,<3",
   "uvicorn>=0.30,<1",
 ]
+
+[project.urls]
+Repository = "https://github.com/lamenting-hawthorn/browserbench"
+Issues = "https://github.com/lamenting-hawthorn/browserbench/issues"
+Documentation = "https://github.com/lamenting-hawthorn/browserbench#readme"
 
 [project.optional-dependencies]
 baselines = ["browser-use>=0.13.6,<0.14"]

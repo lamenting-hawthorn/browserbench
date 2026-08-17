@@ -1,9 +1,18 @@
 # BrowserTransactionBench
 
+**An evidence-first benchmark for transactional safety in browser agents.**
+
 [![CI](https://github.com/lamenting-hawthorn/browserbench/actions/workflows/ci.yml/badge.svg)](https://github.com/lamenting-hawthorn/browserbench/actions/workflows/ci.yml)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Research status: exploratory](https://img.shields.io/badge/research-exploratory-orange.svg)](#current-status)
+
+[Research questions](#research-questions) ·
+[Methodology](#how-it-works) ·
+[Status](docs/STATUS.md) ·
+[Protocol](PROTOCOL.md) ·
+[Roadmap](docs/handoffs/2026-08-06-btb-roadmap.md) ·
+[Contributing](CONTRIBUTING.md)
 
 BrowserTransactionBench (BTB) is a clean-room research harness for testing
 transactional safety in browser agents: whether an authorized durable effect
@@ -34,6 +43,35 @@ BTB makes those questions independently auditable with a synthetic application,
 an authoritative database oracle, controlled post-commit failures, and
 schema-validated run receipts.
 
+## Research questions
+
+The exploratory benchmark is organized around three questions:
+
+- **RQ1 — Effect integrity:** Does the authorized durable effect occur exactly
+  once, with no duplicate, forbidden, or unauthorized state transition?
+- **RQ2 — Calibrated uncertainty:** When an acknowledgement is lost after a
+  possible commit, does the agent distinguish known success, known failure, and
+  an unresolved outcome?
+- **RQ3 — Reconciliation behavior:** Does the agent use visible product state to
+  reconcile before retrying, and is its final belief consistent with the
+  authoritative application state?
+
+## Research artifacts
+
+The project is being developed as four connected artifacts:
+
+1. a versioned browser-task benchmark with authoritative application/database
+   oracles and controlled failure injection;
+2. deterministic and learned-agent baselines under explicit capability
+   policies;
+3. a model-agnostic transactional-safety reference layer based on reconciliation
+   and independently validated receipts; and
+4. a preregistered, multi-domain study and paper after the exploratory harness
+   and calibration gates are complete.
+
+Only the first artifact and the reproducibility foundation of the second and
+third are implemented in this repository today. The fourth remains planned.
+
 ## Current status
 
 Release and task-contract version: `0.1.0`.
@@ -53,7 +91,7 @@ implementation.
 | Workstream | Status | What exists |
 | --- | --- | --- |
 | Scientific-validity core | Complete for the exploratory fixture | Isolated runs, verified post-commit response loss, full-state oracle, strict agent claims |
-| Reproducibility layer | Local candidate | Schema-v2 receipts, independent validator, packaging, deterministic controls, CI definition |
+| Reproducibility layer | Engineering candidate | Schema-v2 receipts, independent validator, packaging, deterministic controls, hosted CI green |
 | Canonical calibration | Not started | Requires exact-tip review, repetition tooling, randomized ordering, and clean canonical receipts |
 | Learned-agent comparison | Not started | No model-performance result is claimed |
 | Publication study | Planned | Multi-domain tasks, preregistration, ablations, analysis, and independent reproduction |
@@ -89,6 +127,19 @@ The methodology keeps three facts separate:
 
 This separation prevents framework success flags, screenshots, or plausible
 agent prose from standing in for transactional evidence.
+
+### Evidence layers
+
+BTB labels evidence by the layer it actually exercises:
+
+| Layer | What it can establish | What it cannot establish |
+| --- | --- | --- |
+| Unit/static checks | Local invariants, schema behavior, and code quality | Browser behavior or provider behavior |
+| Managed-browser controls | Fixture, injector, oracle, and deterministic control mechanics | Learned-agent capability |
+| Installed-package checks | Packaging and clean-environment execution | Hosted or external reproducibility |
+| Hosted CI | Repeatability on GitHub-hosted runners | Canonical study results |
+| Canonical receipts | Frozen, source-bound benchmark observations | External validity without study design |
+| Preregistered study | Predeclared comparisons within the sampled domains | Production-safety certification |
 
 ## What the pilot measures
 
@@ -229,9 +280,26 @@ failures remain denominator-bearing failure receipts.
 - [Legacy evidence classification](docs/legacy-evidence.md) — why early pilot
   artifacts are preserved but excluded from claims.
 
+## Repository structure
+
+```text
+btb/app/                 synthetic transaction application and SQLite state
+btb/harness/             run isolation, fault injection, receipts, validation
+btb/oracle/              strict claim parsing and authoritative evaluation
+btb/tasks/definitions/   versioned exploratory task contracts
+btb/baselines/           deterministic browser controls
+btb/schemas/             schema-v2 receipt contract
+tests/                   unit and integration coverage
+.verify/                 independent verification entry point
+docs/                    status, integrity plan, handoffs, and roadmap
+results/                 historical exploratory research notes
+manifests/               preserved legacy artifacts; non-canonical
+```
+
 ## Roadmap
 
-1. Run an exact-tip independent review and hosted CI on the public repository.
+1. Complete an exact-tip independent review; hosted CI is already green on the
+   accepted private-repository tip.
 2. Add a resumable, randomized repetition runner with a global wall-clock bound.
 3. Produce clean canonical deterministic calibration receipts.
 4. Run a small matched learned-agent pilot only after controls are stable.
@@ -252,6 +320,12 @@ verification gate.
 - Publication claims require the Phase 3 calibration and Phase 4 multi-domain,
   randomized, preregistered reproduction plan in
   `docs/handoffs/2026-08-06-btb-roadmap.md`.
+
+## Citation
+
+If this repository informs your work, cite the software using
+[`CITATION.cff`](CITATION.cff). The preferred paper citation will be added only
+after the study design is preregistered and a manuscript exists.
 
 ## License
 

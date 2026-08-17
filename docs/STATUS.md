@@ -56,7 +56,7 @@ documented in [legacy-evidence.md](legacy-evidence.md).
 | Gate | State | Required evidence |
 | --- | --- | --- |
 | Exploratory harness | Implemented | Source, package, validator, and deterministic-control checks |
-| Hosted CI | To be established on the public tip | Green GitHub Actions matrix and package/browser jobs |
+| Hosted CI | Passing | GitHub Actions matrix plus package and managed-browser jobs |
 | Independent exact-tip review | Pending | Fresh review with authority to veto claims |
 | Repetition and randomization | Pending | Resumable runner, global deadline, stable controls, compatible provenance |
 | Canonical calibration | Blocked | Clean committed source and validated canonical receipts |
@@ -81,7 +81,7 @@ documented in [legacy-evidence.md](legacy-evidence.md).
 
 The immediate engineering sequence is:
 
-1. Establish hosted CI and complete a fresh exact-tip review.
+1. Complete a fresh exact-tip review; hosted CI is established.
 2. Build Phase 3.1 repetition, randomization, resume, and aggregation tooling.
 3. Calibrate deterministic controls from clean canonical commits.
 4. Run a small matched learned-agent pilot with explicit provider/model

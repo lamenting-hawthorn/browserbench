@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: >-
+  If you use BrowserTransactionBench in research, please cite this software.
+title: BrowserTransactionBench
+type: software
+version: 0.1.0
+authors:
+  - family-names: Raghav
+abstract: >-
+  BrowserTransactionBench is an exploratory research harness for evaluating
+  transactional safety in browser agents. It separates authoritative durable
+  effect truth, verified ambiguity delivery, and agent belief under
+  post-commit acknowledgement loss.
+repository-code: https://github.com/lamenting-hawthorn/browserbench
+license: MIT
+keywords:
+  - agent evaluation
+  - browser agents
+  - exactly-once effects
+  - reproducible research
+  - transactional safety
