@@ -1104,6 +1104,36 @@ def test_publication_rollback_does_not_remove_a_replaced_target_inode(
     assert target.read_bytes() == b"foreign"
 
 
+def test_publication_rollback_rejects_same_inode_changed_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    receipt_dir = tmp_path / "receipts"
+    receipt_dir.mkdir()
+    held = repetition._open_receipt_directory(receipt_dir, create=False)
+    artifacts = held.artifacts(create=True)
+    assert artifacts is not None
+    target = receipt_dir / "artifacts" / "run.trace.zip"
+    target.write_bytes(b"owned")
+    original_stat = os.stat
+    expected = original_stat(target, follow_symlinks=False)
+    changed = os.stat_result(
+        (*expected[:6], expected.st_size + 1, *expected[7:])
+    )
+
+    def changed_snapshot(path: str, *args: object, **kwargs: object) -> os.stat_result:
+        if path == target.name:
+            return changed
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(repetition.os, "stat", changed_snapshot)
+    try:
+        assert repetition._unlink_owned(artifacts, target.name, expected) is False
+    finally:
+        held.close()
+    assert target.read_bytes() == b"owned"
+    assert not list((receipt_dir / "artifacts").glob(".btb-repeat-cleanup-*.tmp"))
+
+
 def test_payload_temp_rejects_replacement_before_identity_capture(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

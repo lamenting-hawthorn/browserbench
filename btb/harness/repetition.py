@@ -1524,6 +1524,30 @@ def _owned_file_stat(
     return expected or status
 
 
+_STABLE_FILE_FIELDS = (
+    "st_dev",
+    "st_ino",
+    "st_mode",
+    "st_uid",
+    "st_gid",
+    "st_size",
+    "st_mtime_ns",
+)
+
+
+def _same_owned_regular_file(
+    actual: os.stat_result, expected: os.stat_result
+) -> bool:
+    return (
+        stat.S_ISREG(actual.st_mode)
+        and not stat.S_ISLNK(actual.st_mode)
+        and all(
+            getattr(actual, field) == getattr(expected, field)
+            for field in _STABLE_FILE_FIELDS
+        )
+    )
+
+
 def _unlink_owned(
     directory_descriptor: int,
     name: str,
@@ -1540,11 +1564,7 @@ def _unlink_owned(
         actual = os.stat(name, dir_fd=directory_descriptor, follow_symlinks=False)
     except FileNotFoundError:
         return False
-    if (
-        not stat.S_ISREG(actual.st_mode)
-        or stat.S_ISLNK(actual.st_mode)
-        or not browser_use_sandbox._same_entry(actual, expected)
-    ):
+    if not _same_owned_regular_file(actual, expected):
         return False
     # ponytail: POSIX has no portable unlink-by-inode; quarantine the checked
     # name so a replacement at the original name cannot be deleted.
@@ -1565,9 +1585,7 @@ def _unlink_owned(
     except FileNotFoundError:
         return False
     if (
-        stat.S_ISREG(moved.st_mode)
-        and not stat.S_ISLNK(moved.st_mode)
-        and browser_use_sandbox._same_entry(moved, expected)
+        _same_owned_regular_file(moved, expected)
     ):
         # Re-check after the quarantine move.  A drifted/missing entry is
         # never unlinked; portable POSIX has no unlink-by-inode primitive.
@@ -1579,11 +1597,7 @@ def _unlink_owned(
             )
         except FileNotFoundError:
             return False
-        if (
-            not stat.S_ISREG(current.st_mode)
-            or stat.S_ISLNK(current.st_mode)
-            or not browser_use_sandbox._same_entry(current, expected)
-        ):
+        if not _same_owned_regular_file(current, expected):
             return False
         os.unlink(quarantine, dir_fd=directory_descriptor)
         return True
