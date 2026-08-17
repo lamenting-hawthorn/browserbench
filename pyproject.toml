@@ -48,6 +48,7 @@ dev = [
 
 [project.scripts]
 btb-run = "run_pilot:main"
+btb-repeat = "btb.harness.repetition:main"
 btb-server = "btb.app.server:main"
 btb-validate = "btb.harness.validate_manifest:main"
 

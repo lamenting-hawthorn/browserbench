@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -12,7 +13,7 @@ from typing import ClassVar
 
 import pytest
 
-from btb.harness import engine
+from btb.harness import engine, manifest
 from btb.oracle import claim as claim_mod
 from btb.oracle import score as score_mod
 from btb.tasks import runner as task_runner
@@ -46,6 +47,43 @@ def _completed(builder) -> engine._CompletedRun:
     builder.outcome = evaluation.headline_outcome
     builder.write_json_trace({"steps": []}, kind="test-history")
     return engine._CompletedRun(claim=claim, after=snapshot, evaluation=evaluation)
+
+
+def test_receipt_builder_for_binds_explicit_canonical_source_and_release(
+    tmp_path: Path,
+) -> None:
+    commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        check=True,
+        cwd=manifest.REPO_ROOT,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    from btb.harness import validate_manifest
+
+    digest = validate_manifest._commit_source_sha256(manifest.REPO_ROOT, commit)
+    assert digest is not None
+    source = manifest.SourceProvenance(
+        git_commit=commit,
+        git_dirty=False,
+        source_tree_sha256=digest,
+    )
+    builder = engine.receipt_builder_for(
+        task=task_runner.load_definition("msg_read_01"),
+        run_id="explicit-source-release",
+        baseline="playwright-exact",
+        provider=None,
+        model="deterministic-playwright",
+        max_steps=None,
+        options=engine.ReceiptOptions(mode="canonical", out_dir=tmp_path),
+        source=source,
+        release=manifest.RELEASE_VERSION,
+    )
+    receipt_path = builder.write_failure(RuntimeError("offline source binding"), stage="test")
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt["source"] == source.to_dict()
+    assert receipt["release"] == manifest.RELEASE_VERSION
+    assert validate_manifest.validate_file(receipt_path, source_repo=manifest.REPO_ROOT) == []
 
 
 def test_managed_setup_failure_emits_one_failure_receipt(

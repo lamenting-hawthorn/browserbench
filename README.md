@@ -272,6 +272,73 @@ receipt records that canonical mode was requested and why it was refused.
 `--external-server` exists only as an explicit compatibility mode. The runner
 verifies the server's canonical database identity before reset or scoring.
 
+## Repeated canonical studies
+
+`btb-repeat` creates an immutable, canonical-only task × condition plan before
+it can execute anything. Planning itself is offline: it does not launch a
+browser or call a provider. Each condition freezes its complete effective
+baseline/framework-version/provider/model/step configuration; there is no
+global provider or model default. For deterministic controls the recorded model
+is `deterministic-playwright`.
+
+```bash
+# This writes or verifies one byte-stable, SHA-bound plan. It does not run it.
+btb-repeat plan \
+  --plan manifests/repetition-plans/control-plan.json \
+  --study-id control-calibration-01 \
+  --seed control-calibration-01 \
+  --task msg_read_01 \
+  --condition '{"baseline":"playwright-exact","provider":null,"model":"deterministic-playwright","max_steps":null}' \
+  --repetitions 10 \
+  --study-wall-s 1800 \
+  --source-repo "$PWD"
+
+# On a clean committed checkout, run/resume exactly that plan.
+btb-repeat run \
+  --plan manifests/repetition-plans/control-plan.json \
+  --receipt-dir manifests/repetition-receipts/control-calibration-01 \
+  --source-repo "$PWD"
+
+# Require the exact planned receipt set, independently validate each receipt,
+# then write deterministic canonical-only summaries.
+btb-repeat summarize \
+  --plan manifests/repetition-plans/control-plan.json \
+  --receipt-dir manifests/repetition-receipts/control-calibration-01 \
+  --csv results/control-calibration-01.csv \
+  --markdown results/control-calibration-01.md \
+  --source-repo "$PWD"
+```
+
+Plans bind the exact clean, committed source tree named by `--source-repo`
+(release, Git commit, and source-tree digest) and the imported `btb` runtime
+tree digest separately. This lets an installed wheel plan against a clean source
+checkout without pretending the wheel is that checkout; execution preflights
+both identities. Run IDs are SHA-256 identities of that normalized plan, frozen
+task, explicit condition, and repetition; their order is a recorded
+`sha256-seed-sort-v1`, not Python's implementation-specific shuffle. The outer
+`study_wall_s` budget is cumulative: each valid completed receipt's `duration_s`
+is deducted before a resume starts, and the runner also charges current setup
+time before every new run. Production execution runs each engine lifecycle in a
+parent-owned process group capped by the remaining study/task budget; timeout
+reaps the group, discards all staged child output, and lets only the parent
+publish the one timeout receipt. Successful child artifacts are independently
+validated in an ephemeral system-temp root, whose cleanup is verified before
+the parent publishes artifacts and then receipt JSON last. It starts nothing
+unless enough time remains for that task's recorded wall budget, never
+fabricates a receipt for an unstarted cell, and skips only a valid, exact,
+canonical receipt from the same frozen source and runtime.
+
+The seed changes order only. It does not assign faults or mutate tasks: the
+frozen task definition declares each treatment. CSV and Markdown outputs retain
+all completed planned runs, including setup/baseline/timeout/evaluation failures
+in denominators. They publish pass metrics and observed safety-event rates, status
+and outcome counts, effect/belief/treatment counts, literal prompt-hash sets, and
+declared 95% Wilson score intervals without continuity correction. Managed
+runtime ports are normalized only by the declared `managed-loopback-url-v1`
+compatibility rule; every other prompt template/provenance mismatch fails closed.
+CSV and Markdown form one accepted summary pair only when their embedded
+`summary_sha256` values match; interrupted or partial generations are detectable.
+
 ## Validate
 
 The independent validator loads the packaged JSON Schema and reconstructs

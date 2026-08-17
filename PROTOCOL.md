@@ -351,10 +351,15 @@ from denominators. Runs with different source digests, task versions, prompts,
 framework policies, providers, or models are not pooled in one cell.
 
 Before learned-agent conclusions, deterministic controls must be calibrated on
-one clean committed artifact with randomized order and repeated cells. Current
-Playwright controls enforce a per-action timeout recorded from the task budget,
-but do not yet enforce one outer wall-clock deadline; the Phase 3 repetition
-runner must add that deadline before calibration. The
+one clean committed artifact with randomized order and repeated cells. The
+locally implemented Phase 3.1 repetition runner freezes that artifact's release,
+commit, source-tree digest, and separately hashed imported runtime into the
+plan/run IDs; it enforces a cumulative outer wall-clock budget from validated
+prior receipt durations as well as current setup time. Production attempts are
+bounded by a parent-owned process group deadline and stage output outside the
+canonical receipt directory; only the parent publishes validated artifacts and
+the receipt JSON last after cleanup. This is implementation/local-fixture
+evidence only, not a calibration run. The
 exact control must remain exactly-once, the naive control must expose the
 duplicate hazard, the treatment must be delivered exactly once, read/save must
 satisfy their full contracts, and every receipt must validate. Instability is a

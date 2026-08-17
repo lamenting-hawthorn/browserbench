@@ -325,7 +325,9 @@ and obtain fresh veto-capable review before any canonical Phase 3 receipts.
 
 ## Phase 3.1 — Repetition runner and summary tooling
 
-Current status: pending.
+Current status: implemented and locally verified in the current candidate using
+offline synthetic fixtures only. No canonical matrix was executed; Phase 3.2
+remains pending.
 
 Implement a repetition runner that:
 
@@ -336,6 +338,8 @@ Implement a repetition runner that:
 - preserves one schema-v2 receipt per run;
 - records failures/timeouts rather than dropping them;
 - supports resume without duplicating completed run IDs;
+- stages child output outside the receipt directory and lets the parent publish
+  validated artifacts and receipt JSON last after cleanup;
 - validates every receipt before aggregation;
 - writes CSV and Markdown summaries derived only from validated canonical receipts.
 
@@ -536,7 +540,8 @@ native auditable receipt and authority boundaries remain intact.
 - Phase 2.2 packaging/CI: clean wheel acceptance passed; hosted CI pending
 - Phase 2.3 docs/freeze/artifacts: local consistency review passed
 - Phase 2 review: manual review complete; fresh veto review pending
-- Phase 3.1 repetition runner: pending
+- Phase 3.1 repetition runner: implemented/locally verified in this candidate;
+  no canonical matrix executed
 - Phase 3.2 deterministic controls: pending
 - Phase 3.3 learned-agent pilot: pending
 - Phase 4 publication study: pending, blocked on Phase 3

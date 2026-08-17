@@ -2155,13 +2155,27 @@ def validate_file(
             receipt = json.load(handle)
     except (OSError, json.JSONDecodeError) as exc:
         return [ValidationIssue("$", f"cannot read JSON receipt: {exc}")]
-    issues = validate_receipt(
+    return validate_loaded_receipt(
         receipt,
         schema_path=schema_path,
         source_repo=source_repo,
+        receipt_directory=path.parent,
     )
-    issues.extend(_trace_artifact_errors(receipt, path))
-    issues.extend(_framework_inventory_artifact_errors(receipt, path))
+
+
+def validate_loaded_receipt(
+    receipt: object,
+    *,
+    receipt_directory: Path,
+    schema_path: Path = DEFAULT_SCHEMA_PATH,
+    source_repo: Path | None = REPO_ROOT,
+) -> list[ValidationIssue]:
+    """Validate already safely loaded JSON without reopening its receipt file."""
+
+    issues = validate_receipt(receipt, schema_path=schema_path, source_repo=source_repo)
+    receipt_path = receipt_directory / "receipt.json"
+    issues.extend(_trace_artifact_errors(receipt, receipt_path))
+    issues.extend(_framework_inventory_artifact_errors(receipt, receipt_path))
     return sorted(set(issues))
 
 

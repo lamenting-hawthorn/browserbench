@@ -386,6 +386,8 @@ def make_receipt_builder(
     baseline: manifest_mod.BaselineProvenance,
     options: ReceiptOptions | None = None,
     configured_steps: int | None,
+    source: manifest_mod.SourceProvenance | None = None,
+    release: str = manifest_mod.RELEASE_VERSION,
 ) -> manifest_mod.ReceiptBuilder:
     """Create provenance before setup so setup failures can still be receipted."""
 
@@ -400,6 +402,8 @@ def make_receipt_builder(
         canonical_requested=receipt_options.canonical,
         task_definition=task,
         prompt_text=None,
+        source=source,
+        release=release,
         out_dir=receipt_options.out_dir,
     )
 
@@ -413,6 +417,8 @@ def receipt_builder_for(
     model: str | None,
     max_steps: int | None,
     options: ReceiptOptions | None = None,
+    source: manifest_mod.SourceProvenance | None = None,
+    release: str = manifest_mod.RELEASE_VERSION,
 ) -> manifest_mod.ReceiptBuilder:
     """Resolve one CLI baseline into the provenance used by the engine."""
 
@@ -439,6 +445,8 @@ def receipt_builder_for(
         baseline=provenance,
         options=options,
         configured_steps=configured_steps,
+        source=source,
+        release=release,
     )
 
 
