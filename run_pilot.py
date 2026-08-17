@@ -110,7 +110,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--baseline",
         action="append",
         default=[],
-        choices=["playwright-exact", "playwright-naive", "browser-use"],
+        choices=[
+            "playwright-exact",
+            "playwright-naive",
+            "browser-use",
+            "browser-use-full",
+        ],
         help="baseline(s) to run; repeat for multiple",
     )
     parser.add_argument(
@@ -120,12 +125,16 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=PILOT_TASKS,
         help="task id(s) to run; default all pilot tasks",
     )
-    parser.add_argument("--model", default=None, help="model for browser-use baseline")
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="model for browser-use learned baselines",
+    )
     parser.add_argument(
         "--provider",
         default=None,
         choices=["deepseek", "openai", "anthropic"],
-        help="LLM provider for browser-use (deepseek|openai|anthropic)",
+        help="LLM provider for browser-use learned baselines (deepseek|openai|anthropic)",
     )
     parser.add_argument(
         "--mode",
@@ -185,6 +194,20 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--max-steps must be positive")
 
     baselines = args.baseline or ["playwright-exact"]
+    if "browser-use-full" in baselines and (
+        args.provider is None or args.model is None
+    ):
+        parser.error(
+            "browser-use-full requires explicit --provider and --model arguments"
+        )
+    if "browser-use-full" in baselines and (
+        args.provider,
+        args.model,
+    ) not in engine._BROWSER_USE_FULL_PROVIDER_MODELS:
+        parser.error(
+            "browser-use-full provider/model must be one of: "
+            "anthropic/claude-sonnet-4-0, openai/gpt-4.1-mini"
+        )
     tasks = args.task or PILOT_TASKS
     results: list[dict] = []
     receipt_options = engine.ReceiptOptions(

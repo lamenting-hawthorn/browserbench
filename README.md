@@ -167,15 +167,13 @@ Python 3.11 or newer is required.
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install --constraint constraints/runtime-0.1.0.txt -e ".[dev]"
+python -m pip install --constraint constraints/runtime-0.1.0.txt -e ".[baselines,dev]"
 python -m playwright install chromium
 ```
 
-For the learned Browser Use baseline:
-
-```bash
-python -m pip install --constraint constraints/runtime-0.1.0.txt -e ".[baselines]"
-```
+The documented test environment includes Browser Use 0.13.6: its local
+constructor/sandbox gate is decisive and is not skipped when the dependency is
+missing.
 
 `constraints/runtime-0.1.0.txt` pins the direct versions exercised by the
 local release gate and CI workflow. It is a constraint set, not a complete
@@ -195,14 +193,66 @@ btb-run --list
 btb-run --task msg_send_01 --baseline playwright-exact
 btb-run --task msg_send_01 --baseline playwright-naive
 
-# Learned baseline. Provider/model are explicit in the receipt.
+# Learned baselines. Provider/model are explicit in the receipt.
 export DEEPSEEK_API_KEY=...
 btb-run \
   --task msg_send_01 \
   --baseline browser-use \
   --provider deepseek \
   --model deepseek-chat
+
+# Clean-room expanded composite condition: vision on,
+# judge off, max_actions_per_step=8, and the 18-action visible-page
+# tool set (arbitrary file/PDF/evaluate/write actions still excluded).
+export OPENAI_API_KEY=...
+btb-run \
+  --task msg_send_01 \
+  --baseline browser-use-full \
+  --provider openai \
+  --model gpt-4.1-mini
 ```
+
+`browser-use-full` is a **composite** condition: it changes vision, action-set
+breadth, and `max_actions_per_step` at once. It is implemented as a clean-room
+benchmark condition and must be decomposed by later ablations before any
+single-capability claim is drawn from it. Both
+learned conditions keep fresh managed browsers, per-run UI-token isolation,
+origin-only navigation, telemetry off, and no direct API/database or arbitrary
+agent-controlled filesystem access. Framework-created files are restricted to
+one parent-owned system-temporary sandbox per run, inventory-hashed after the
+child exits, then removed and verified before a successful learned receipt.
+The independent validator reconstructs each condition's exact policy and
+rejects drift or inventory tampering.
+
+Here, origin-only navigation is a narrow, explicit contract: the
+benchmark-owned `navigate` callback validates the exact fixture HTTP(S) origin
+before dispatch. Browser Use's allowed-domain/SecurityWatchdog layer is only
+defense in depth for HTTP(S) navigation after dispatch, and the harness then
+observes/recover-stops an unverified final URL. The controlled fixture exposes
+no link or navigation-producing click controls; that does not establish a
+general click-containment guarantee. In `browser-use-full`, the retained
+`search` name preserves Browser Use 0.13.6's `SearchAction` schema but is a
+benchmark-owned no-dispatch rejection, so external web search is unavailable.
+
+`browser-use-full` requires an explicit statically allowlisted pair:
+`openai/gpt-4.1-mini` or `anthropic/claude-sonnet-4-0`. This allowlist is a
+local framework-policy constraint, not evidence that either remote service was
+called or its vision behavior was verified. Other pairs fail closed before
+browser launch or provider invocation. Browser Use 0.13.6 removes `screenshot`
+when passed an explicit vision boolean, so the harness uses its public `auto`
+compatibility setting, binds the effective value to `true`, and replaces the
+upstream file-capable screenshot action with a benchmark-owned action that has
+no filename/path parameter and only requests an image in the next observation.
+Immediately before `Agent.run()`, the harness audits effective settings, LLM
+roles, the action registry, generated action schemas, and screenshot callback
+identity/parameter behavior plus each fixture-owned bound callback, including
+the no-dispatch search rejection; the observed semantic policy is bound into
+the receipt and independently validated without callable-source hashing.
+
+This is application/framework path confinement, not mandatory OS containment
+against arbitrary Python or native code. The implemented proof is static/unit,
+local child-process lifecycle, and exact installed-framework constructor audit;
+it does not include a live provider or browser benchmark run.
 
 Never put API keys on the command line. Receipt-owned free text and JSON traces
 are sanitized, but provider credentials must still remain in environment
@@ -221,6 +271,73 @@ receipt records that canonical mode was requested and why it was refused.
 
 `--external-server` exists only as an explicit compatibility mode. The runner
 verifies the server's canonical database identity before reset or scoring.
+
+## Repeated canonical studies
+
+`btb-repeat` creates an immutable, canonical-only task × condition plan before
+it can execute anything. Planning itself is offline: it does not launch a
+browser or call a provider. Each condition freezes its complete effective
+baseline/framework-version/provider/model/step configuration; there is no
+global provider or model default. For deterministic controls the recorded model
+is `deterministic-playwright`.
+
+```bash
+# This writes or verifies one byte-stable, SHA-bound plan. It does not run it.
+btb-repeat plan \
+  --plan manifests/repetition-plans/control-plan.json \
+  --study-id control-calibration-01 \
+  --seed control-calibration-01 \
+  --task msg_read_01 \
+  --condition '{"baseline":"playwright-exact","provider":null,"model":"deterministic-playwright","max_steps":null}' \
+  --repetitions 10 \
+  --study-wall-s 1800 \
+  --source-repo "$PWD"
+
+# On a clean committed checkout, run/resume exactly that plan.
+btb-repeat run \
+  --plan manifests/repetition-plans/control-plan.json \
+  --receipt-dir manifests/repetition-receipts/control-calibration-01 \
+  --source-repo "$PWD"
+
+# Require the exact planned receipt set, independently validate each receipt,
+# then write deterministic canonical-only summaries.
+btb-repeat summarize \
+  --plan manifests/repetition-plans/control-plan.json \
+  --receipt-dir manifests/repetition-receipts/control-calibration-01 \
+  --csv results/control-calibration-01.csv \
+  --markdown results/control-calibration-01.md \
+  --source-repo "$PWD"
+```
+
+Plans bind the exact clean, committed source tree named by `--source-repo`
+(release, Git commit, and source-tree digest) and the imported `btb` runtime
+tree digest separately. This lets an installed wheel plan against a clean source
+checkout without pretending the wheel is that checkout; execution preflights
+both identities. Run IDs are SHA-256 identities of that normalized plan, frozen
+task, explicit condition, and repetition; their order is a recorded
+`sha256-seed-sort-v1`, not Python's implementation-specific shuffle. The outer
+`study_wall_s` budget is cumulative: each valid completed receipt's `duration_s`
+is deducted before a resume starts, and the runner also charges current setup
+time before every new run. Production execution runs each engine lifecycle in a
+parent-owned process group capped by the remaining study/task budget; timeout
+reaps the group, discards all staged child output, and lets only the parent
+publish the one timeout receipt. Successful child artifacts are independently
+validated in an ephemeral system-temp root, whose cleanup is verified before
+the parent publishes artifacts and then receipt JSON last. It starts nothing
+unless enough time remains for that task's recorded wall budget, never
+fabricates a receipt for an unstarted cell, and skips only a valid, exact,
+canonical receipt from the same frozen source and runtime.
+
+The seed changes order only. It does not assign faults or mutate tasks: the
+frozen task definition declares each treatment. CSV and Markdown outputs retain
+all completed planned runs, including setup/baseline/timeout/evaluation failures
+in denominators. They publish pass metrics and observed safety-event rates, status
+and outcome counts, effect/belief/treatment counts, literal prompt-hash sets, and
+declared 95% Wilson score intervals without continuity correction. Managed
+runtime ports are normalized only by the declared `managed-loopback-url-v1`
+compatibility rule; every other prompt template/provenance mismatch fails closed.
+CSV and Markdown form one accepted summary pair only when their embedded
+`summary_sha256` values match; interrupted or partial generations are detectable.
 
 ## Validate
 

@@ -69,3 +69,106 @@ def test_unknown_task_is_rejected_by_cli() -> None:
     with pytest.raises(SystemExit) as exc_info:
         run_pilot.main(["--task", "../outside"])
     assert exc_info.value.code == 2
+
+
+def test_browser_use_full_is_an_accepted_cli_baseline_choice(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run_managed(*, baseline, **kwargs):
+        del kwargs
+        captured["baseline"] = baseline
+        return {
+            "status": "success",
+            "task": "msg_read_01",
+            "outcome": "read_only_ok",
+            "claimed_send": False,
+            "receipt_path": str(tmp_path / "ok.json"),
+        }
+
+    monkeypatch.setattr(run_pilot.engine, "run_managed", fake_run_managed)
+    status = run_pilot.main(
+        [
+            "--task",
+            "msg_read_01",
+            "--baseline",
+            "browser-use-full",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-4.1-mini",
+            "--receipt-dir",
+            str(tmp_path),
+        ]
+    )
+    assert status == 0
+    assert captured["baseline"] == "browser-use-full"
+
+
+def test_browser_use_full_routes_through_external_executor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run_external(*, baseline, **kwargs):
+        del kwargs
+        captured["baseline"] = baseline
+        return {
+            "status": "success",
+            "task": "msg_read_01",
+            "outcome": "read_only_ok",
+            "claimed_send": False,
+            "receipt_path": str(tmp_path / "external.json"),
+        }
+
+    def fake_verify_external_server(**_kwargs):
+        return None
+
+    monkeypatch.setattr(run_pilot.engine, "run_external", fake_run_external)
+    monkeypatch.setattr(run_pilot.runtime, "verify_fixture_identity", fake_verify_external_server)
+    status = run_pilot.main(
+        [
+            "--task",
+            "msg_read_01",
+            "--baseline",
+            "browser-use-full",
+            "--provider",
+            "openai",
+            "--model",
+            "gpt-4.1-mini",
+            "--external-server",
+            "--receipt-dir",
+            str(tmp_path),
+        ]
+    )
+    assert status == 0
+    assert captured["baseline"] == "browser-use-full"
+
+
+def test_browser_use_full_rejects_implicit_provider_model_defaults() -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        run_pilot.main(
+            ["--task", "msg_read_01", "--baseline", "browser-use-full"]
+        )
+    assert exc_info.value.code == 2
+
+
+def test_browser_use_full_cli_rejects_non_allowlisted_pair() -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        run_pilot.main(
+            [
+                "--task",
+                "msg_read_01",
+                "--baseline",
+                "browser-use-full",
+                "--provider",
+                "deepseek",
+                "--model",
+                "deepseek-chat",
+            ]
+        )
+    assert exc_info.value.code == 2

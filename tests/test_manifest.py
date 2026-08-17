@@ -136,6 +136,98 @@ def test_success_requires_complete_trace(tmp_path: Path) -> None:
         builder.write_success()
 
 
+def test_effective_baseline_binding_is_single_owner_and_semantically_bound(
+    tmp_path: Path,
+) -> None:
+    desired = manifest.BaselineProvenance(
+        name="browser-use",
+        framework_name="browser-use",
+        framework_version="0.13.6",
+        provider="deepseek",
+        model="deepseek-chat",
+        parameters={
+            "fixed": True,
+            "effective_policy": {"status": "unobserved"},
+        },
+        modality_policy={"dom": True, "vision": False},
+        capability_policy={"filesystem": "isolated"},
+    )
+    builder = manifest.ReceiptBuilder(
+        run_id="effective-binding",
+        freeze="test-freeze",
+        baseline=desired,
+        configured_steps=1,
+        configured_wall_s=1,
+        canonical_requested=False,
+        task_definition={"id": "test-task"},
+        prompt_text="exact prompt",
+        source=manifest.SourceProvenance(
+            git_commit="a" * 40,
+            git_dirty=True,
+            source_tree_sha256="b" * 64,
+        ),
+        out_dir=tmp_path,
+    )
+    policy = {"status": "observed", "actions": ["click"]}
+    observed = manifest.BaselineProvenance(
+        name=desired.name,
+        framework_name=desired.framework_name,
+        framework_version=desired.framework_version,
+        provider=desired.provider,
+        model=desired.model,
+        parameters={
+            "fixed": True,
+            "effective_policy": policy,
+        },
+        modality_policy=desired.modality_policy,
+        capability_policy=desired.capability_policy,
+    )
+    builder.bind_effective_baseline(observed)
+    assert builder.baseline == observed
+    with pytest.raises(RuntimeError, match="already been bound"):
+        builder.bind_effective_baseline(observed)
+
+
+def test_framework_sandbox_path_is_redacted_and_inventory_is_bound(tmp_path: Path) -> None:
+    builder = manifest.ReceiptBuilder(
+        run_id="sandbox-binding",
+        freeze="test-freeze",
+        baseline=manifest.BaselineProvenance(
+            name="browser-use",
+            framework_name="browser-use",
+            framework_version="0.13.6",
+            provider="deepseek",
+            model="deepseek-chat",
+            parameters={},
+            modality_policy={},
+            capability_policy={},
+        ),
+        configured_steps=1,
+        configured_wall_s=1,
+        canonical_requested=False,
+        task_definition={"id": "test-task"},
+        prompt_text="exact prompt",
+        out_dir=tmp_path,
+    )
+    root = tmp_path / "private-sandbox"
+    builder.register_framework_sandbox(root)
+    state = builder.bind_framework_filesystem(
+        state="cleaned",
+        inventory={
+            "version": 1,
+            "entries": [],
+            "entry_count": 0,
+            "file_count": 0,
+            "total_bytes": 0,
+            "inventory_sha256": manifest.canonical_json_sha256({"entries": []}),
+        },
+    )
+    assert state["cleanup_verified"] is True
+    assert state["inventory"] is not None
+    receipt = builder.write_failure(RuntimeError(f"failed in {root}"), stage="baseline")
+    assert str(root) not in receipt.read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize("wall_s", [0, -1, True, "90"])
 def test_receipt_builder_rejects_invalid_wall_budget(
     tmp_path: Path,

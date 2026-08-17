@@ -325,7 +325,9 @@ and obtain fresh veto-capable review before any canonical Phase 3 receipts.
 
 ## Phase 3.1 — Repetition runner and summary tooling
 
-Current status: pending.
+Current status: implemented and locally verified in the current candidate using
+offline synthetic fixtures only. No canonical matrix was executed; Phase 3.2
+remains pending.
 
 Implement a repetition runner that:
 
@@ -336,6 +338,8 @@ Implement a repetition runner that:
 - preserves one schema-v2 receipt per run;
 - records failures/timeouts rather than dropping them;
 - supports resume without duplicating completed run IDs;
+- stages child output outside the receipt directory and lets the parent publish
+  validated artifacts and receipt JSON last after cleanup;
 - validates every receipt before aggregation;
 - writes CSV and Markdown summaries derived only from validated canonical receipts.
 
@@ -389,6 +393,18 @@ Only after deterministic calibration passes:
 - start with a small matched matrix before spending on a larger pilot;
 - retain all failed and timed-out runs in denominators;
 - label results as exploratory unless the full canonical protocol is satisfied.
+
+Run both frozen learned conditions against the same matrix:
+
+- `browser-use`, the restricted DOM-only condition with its preserved
+  framework-default action batching;
+- `browser-use-full`, the composite vision-enabled, expanded-safe-registry,
+  eight-actions-per-step condition.
+
+The full condition remains clean-room: do not import Anticipy code, prompts,
+traces, task data, or implementation details. Because it changes several
+runtime factors together, report it as a composite condition; a difference
+between the two conditions does not identify which factor caused the change.
 
 Do not compare old DeepSeek runs to new runs as if matched. Do not infer the old acting-agent model identity.
 
@@ -454,10 +470,17 @@ Build a factorial, matched set of product affordances:
 - visible transaction history on versus off;
 - explicit reconciliation endpoint/tool on versus off;
 - ambiguity cue versus neutral instruction;
-- DOM-only, vision-enabled, and explicitly API-assisted capability policies.
+- DOM-only versus vision-enabled operation;
+- restricted versus expanded safe action registries;
+- one versus eight actions per step;
+- explicitly API-assisted capability policies.
 
 Change only the declared factor inside a matched comparison. Receipt hashes and
 validator rules must make unintended fixture/prompt differences detectable.
+Use these single-factor cells to separate the effects that the Phase 3
+`browser-use-full` composite deliberately combines. File I/O, arbitrary code
+evaluation, and direct database or benchmark-API access remain prohibited in
+all browser-only cells.
 
 ### Phase 4.4 — Matched learned-agent conditions
 
@@ -517,7 +540,8 @@ native auditable receipt and authority boundaries remain intact.
 - Phase 2.2 packaging/CI: clean wheel acceptance passed; hosted CI pending
 - Phase 2.3 docs/freeze/artifacts: local consistency review passed
 - Phase 2 review: manual review complete; fresh veto review pending
-- Phase 3.1 repetition runner: pending
+- Phase 3.1 repetition runner: implemented/locally verified in this candidate;
+  no canonical matrix executed
 - Phase 3.2 deterministic controls: pending
 - Phase 3.3 learned-agent pilot: pending
 - Phase 4 publication study: pending, blocked on Phase 3

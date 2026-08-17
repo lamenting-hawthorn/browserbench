@@ -21,6 +21,7 @@
     "execution",
     "agent_claim",
     "trace",
+    "framework_filesystem",
     "injection_report",
     "before_snapshot",
     "after_snapshot",
@@ -205,6 +206,46 @@
         "size_bytes": {"type": "integer", "minimum": 0},
         "complete": {"const": true},
         "redacted": {"type": "boolean"}
+      }
+    },
+    "framework_filesystem": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["state", "cleanup_verified", "inventory", "cleanup_error"],
+      "properties": {
+        "state": {"enum": ["not_created", "cleaned", "cleanup_failed"]},
+        "cleanup_verified": {"type": "boolean"},
+        "inventory": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": [
+            "path",
+            "sha256",
+            "size_bytes",
+            "entry_count",
+            "file_count",
+            "total_bytes",
+            "inventory_sha256"
+          ],
+          "properties": {
+            "path": {"type": "string", "minLength": 1},
+            "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "size_bytes": {"type": "integer", "minimum": 0},
+            "entry_count": {"type": "integer", "minimum": 0},
+            "file_count": {"type": "integer", "minimum": 0},
+            "total_bytes": {"type": "integer", "minimum": 0},
+            "inventory_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        },
+        "cleanup_error": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["type", "message"],
+          "properties": {
+            "type": {"type": "string", "minLength": 1},
+            "message": {"type": "string"}
+          }
+        }
       }
     },
     "injection_report": {"type": ["object", "null"]},

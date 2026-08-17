@@ -25,7 +25,7 @@ jobs:
         run: >-
           python -m pip install
           --constraint constraints/runtime-0.1.0.txt
-          -e ".[dev]"
+          -e ".[baselines,dev]"
       - name: Lint
         run: python -m ruff check .
       - name: Test without cache
@@ -50,14 +50,23 @@ jobs:
           python -m venv "$RUNNER_TEMP/btb-wheel"
           "$RUNNER_TEMP/btb-wheel/bin/pip" install --constraint constraints/runtime-0.1.0.txt dist/*.whl
           "$RUNNER_TEMP/btb-wheel/bin/btb-run" --list
+          "$RUNNER_TEMP/btb-wheel/bin/btb-repeat" plan \
+            --plan "$RUNNER_TEMP/btb-repeat-plan.json" \
+            --study-id wheel-plan-smoke \
+            --seed wheel-plan-smoke \
+            --task msg_read_01 \
+            --condition '{"baseline":"playwright-exact","provider":null,"model":"deterministic-playwright","max_steps":null}' \
+            --repetitions 1 \
+            --study-wall-s 120 \
+            --source-repo "$GITHUB_WORKSPACE"
           "$RUNNER_TEMP/btb-wheel/bin/btb-validate" --help
-          "$RUNNER_TEMP/btb-wheel/bin/python" -c "from pathlib import Path; import btb.app.server as s; import btb.harness.validate_manifest as v; import btb.tasks.runner as t; assert Path(s.__file__).with_name('templates').joinpath('index.html').is_file(); assert v.DEFAULT_SCHEMA_PATH.is_file(); assert t.load_definition('msg_send_01')['id'] == 'msg_send_01'"
+          "$RUNNER_TEMP/btb-wheel/bin/python" -c "import json; from pathlib import Path; import btb.app.server as s; import btb.harness.validate_manifest as v; import btb.tasks.runner as t; plan=json.loads(Path('$RUNNER_TEMP/btb-repeat-plan.json').read_text()); assert plan['runtime']['tree_sha256']; assert Path(s.__file__).with_name('templates').joinpath('index.html').is_file(); assert v.DEFAULT_SCHEMA_PATH.is_file(); assert t.load_definition('msg_send_01')['id'] == 'msg_send_01'"
       - name: Verify optional learned-baseline API contract
         env:
           ANONYMIZED_TELEMETRY: "false"
         run: |
           "$RUNNER_TEMP/btb-wheel/bin/pip" install --constraint constraints/runtime-0.1.0.txt "dist/browsertransactionbench-0.1.0-py3-none-any.whl[baselines]"
-          "$RUNNER_TEMP/btb-wheel/bin/python" -c "from btb.harness import engine; from browser_use import Agent, Browser, Tools; c=engine.BrowserUseConfig(provider='deepseek', model='deepseek-chat', max_steps=5, wall_s=10); llm=engine._make_llm(c, api_key='test-only'); origin=engine._fixture_origin_pattern('http://127.0.0.1:4321'); browser=Browser(headless=True, accept_downloads=False, allowed_domains=[origin], captcha_solver=False, cross_origin_iframes=False, deterministic_rendering=True, enable_default_extensions=False, permissions=[]); tools=engine._make_browser_tools(Tools, c); agent=Agent(task='Open http://127.0.0.1:4321/ and return exactly {\"believes\":\"unknown\"}', browser=browser, llm=llm, tools=tools, directly_open_url=True, available_file_paths=[], use_judge=False, use_vision=False); assert agent is not None; assert browser.browser_profile.allowed_domains == [origin]"
+          "$RUNNER_TEMP/btb-wheel/bin/python" -c "from btb.harness import engine; expected={'browser-use:deepseek/deepseek-chat', 'browser-use-full:anthropic/claude-sonnet-4-0', 'browser-use-full:openai/gpt-4.1-mini'}; assert set(engine.audit_browser_use_installation()) == expected"
 
   managed-browser-smoke:
     runs-on: ubuntu-latest
